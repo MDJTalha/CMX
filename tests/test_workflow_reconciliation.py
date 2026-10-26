@@ -385,6 +385,10 @@ def test_atomic_non_application_resolution_marks_step_failed_and_audits_once(tmp
     assert result["resolution"] == "effect_not_applied"
     assert after.steps[0].status == "failed"
     assert after.workflow_state == "failed"
+    assert after.task.state.value == "failed"
+    assert store.task_store.verify_audit_chain(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    ) is True
     assert len(after_events) == len(before_events) + 1
     assert after_events[-1].event_type == "step.reconciliation_resolved_failed"
     assert after_events[-1].payload["details"]["review_event_id"] == result["review_event_id"]
@@ -452,6 +456,10 @@ def test_atomic_success_resolution_commits_output_and_audit_without_resuming(tmp
     assert after.steps[0].status == "succeeded"
     assert after.steps[0].output_payload == {"result": 42}
     assert after.workflow_state == "failed"
+    assert after.task.state.value == "failed"
+    assert store.task_store.verify_audit_chain(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    ) is True
     assert len(after_events) == len(before_events) + 1
     assert after_events[-1].event_type == "step.reconciliation_resolved_succeeded"
     assert after_events[-1].payload["details"]["review_event_id"] == result["review_event_id"]
