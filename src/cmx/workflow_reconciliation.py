@@ -42,29 +42,37 @@ class SQLiteWorkflowReconciler:
         current = SQLiteTaskStore._task_from_row(row)
         if current.state == TaskState.FAILED:
             return current.state
-        if current.state != TaskState.RUNNING:
-            raise WorkflowConflictError("Reconciliation resolution requires the task to be running or already failed.")
-        updated = current.apply(TaskEvent.ERROR, expected_version=current.version)
-        cursor = connection.execute(
-            """UPDATE cmx_tasks SET state = ?, version = ?, attempts = ?, max_attempts = ?,
-               last_event = ?, updated_at = ? WHERE tenant_id = ? AND task_id = ? AND version = ?""",
-            (updated.state.value, updated.version, updated.attempts, updated.max_attempts,
-             updated.last_event.value if updated.last_event is not None else None,
-             occurred_at, tenant_id, task_id, current.version),
-        )
-        if cursor.rowcount != 1:
-            raise WorkflowConflictError("Task version changed during reconciliation resolution.")
-        SQLiteTaskStore._append_audit_event(
-            connection, tenant_id=tenant_id, task_id=task_id, sequence=updated.version,
-            event_type=TaskEvent.ERROR.value, occurred_at=occurred_at, actor_id=actor_id,
-            payload={
-                "state": updated.state.value, "version": updated.version,
-                "previous_version": current.version, "attempts": updated.attempts,
-                "max_attempts": updated.max_attempts, "previous_state": current.state.value,
-                "last_event": updated.last_event.value if updated.last_event is not None else None,
-            },
-        )
-        return updated.state
+        if current.state not in {TaskState.PLANNED, TaskState.RUNNING}:
+            raise WorkflowConflictError(
+                "Reconciliation resolution requires a planned/running task or an already failed task."
+            )
+
+        # A submitted workflow can still have task state 'planned' because execution is
+        # tracked separately at the step level. Follow legal task transitions in order.
+        events = [TaskEvent.START, TaskEvent.ERROR] if current.state == TaskState.PLANNED else [TaskEvent.ERROR]
+        for event in events:
+            updated = current.apply(event, expected_version=current.version)
+            cursor = connection.execute(
+                """UPDATE cmx_tasks SET state = ?, version = ?, attempts = ?, max_attempts = ?,
+                   last_event = ?, updated_at = ? WHERE tenant_id = ? AND task_id = ? AND version = ?""",
+                (updated.state.value, updated.version, updated.attempts, updated.max_attempts,
+                 updated.last_event.value if updated.last_event is not None else None,
+                 occurred_at, tenant_id, task_id, current.version),
+            )
+            if cursor.rowcount != 1:
+                raise WorkflowConflictError("Task version changed during reconciliation resolution.")
+            SQLiteTaskStore._append_audit_event(
+                connection, tenant_id=tenant_id, task_id=task_id, sequence=updated.version,
+                event_type=event.value, occurred_at=occurred_at, actor_id=actor_id,
+                payload={
+                    "state": updated.state.value, "version": updated.version,
+                    "previous_version": current.version, "attempts": updated.attempts,
+                    "max_attempts": updated.max_attempts, "previous_state": current.state.value,
+                    "last_event": updated.last_event.value if updated.last_event is not None else None,
+                },
+            )
+            current = updated
+        return current.state
 
     def inspect_uncertain_steps(
         self,
