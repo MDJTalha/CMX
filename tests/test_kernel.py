@@ -71,6 +71,13 @@ def test_stale_version_is_rejected():
         task.apply(TaskEvent.PLAN_ACCEPTED, expected_version=1)
 
 
+@pytest.mark.parametrize("expected_version", [False, 0.0, "0"])
+def test_task_record_rejects_non_integer_expected_versions(expected_version):
+    task = TaskRecord(task_id="task_001")
+    with pytest.raises(StaleTaskVersionError, match="must be an integer"):
+        task.apply(TaskEvent.PLAN_ACCEPTED, expected_version=expected_version)
+
+
 def test_invalid_transition_is_rejected():
     with pytest.raises(InvalidTransitionError):
         next_task_state(TaskState.CREATED, TaskEvent.START)

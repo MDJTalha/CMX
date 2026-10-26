@@ -25,9 +25,9 @@ The engine only evaluates supplied candidate records. It does **not** browse the
 
 ## Reasoning kernel status — under active development
 
-The dependent draft pull-request series adds contracts for task lifecycle state, bounded retries, execution-plan dependency validation, a capability allowlist, human-approval requirements, completion verification, and JSON Schema validation for capability inputs and outputs.
+The dependent draft pull-request series adds contracts for task lifecycle state, bounded retries, execution-plan dependency validation, a capability allowlist, human-approval requirements, completion verification, JSON Schema validation, and tenant-scoped authorization policy. It also adds a file-backed SQLite reference store for task transitions and hash-chained audit events.
 
-These are engineering contracts, not a functioning autonomous runtime. The kernel currently does not execute tools or external actions, authenticate a caller, persist task state, retrieve live vendor data or connect an LLM. The new authorization policy requires an internally supplied, upstream-verified principal context and fails closed on missing permissions, expired context and tenant mismatches; however, a real authentication/session verifier is not yet connected. Never construct this context from client-supplied JSON. The changes remain in draft pull requests and require review before merging.
+These are engineering foundations, not a functioning autonomous runtime. No real authentication/session verifier, credential revocation service, live vendor retrieval, LLM provider or external executor is connected. The authorization policy consumes an internally supplied principal context and must never accept one from client-supplied JSON. SQLite is a single-node reference backend; production migration, backup/restore, retention and operational controls remain open. All changes remain in draft pull requests and require review before merging.
 
 ## Quick start — Windows PowerShell
 
