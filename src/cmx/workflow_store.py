@@ -274,6 +274,7 @@ class SQLiteWorkflowStore:
                       OR NEW.ordinal IS NOT OLD.ordinal
                       OR NEW.capability_id IS NOT OLD.capability_id
                       OR NEW.capability_version IS NOT OLD.capability_version
+                      OR NEW.capability_fingerprint IS NOT OLD.capability_fingerprint
                       OR NEW.max_attempts IS NOT OLD.max_attempts
                       OR NEW.requires_approval IS NOT OLD.requires_approval
                       OR NEW.input_json IS NOT OLD.input_json
@@ -1146,6 +1147,8 @@ class SQLiteWorkflowStore:
         )
         timestamp = _timestamp(occurred_at)
         output_json = _canonical_json(output_payload)
+        if len(output_json.encode("utf-8")) > 262_144:
+            raise ValueError("Workflow step output exceeds the maximum encoded size of 262144 bytes.")
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
