@@ -1054,6 +1054,42 @@ class SQLiteWorkflowStore:
                 raise
         return self._row_to_step(final)
 
+    @staticmethod
+    def _assert_worker_lease(
+        connection: sqlite3.Connection,
+        *,
+        tenant_id: str,
+        task_id: str,
+        step_id: str,
+        worker_id: str | None,
+        fencing_token: int | None,
+        now_epoch: int,
+    ) -> None:
+        """Check lease ownership inside the same transaction as a step transition."""
+        if worker_id is None and fencing_token is None:
+            return
+        if (
+            not isinstance(worker_id, str)
+            or not worker_id
+            or isinstance(fencing_token, bool)
+            or not isinstance(fencing_token, int)
+            or fencing_token < 1
+        ):
+            raise WorkflowConflictError("A valid worker ID and fencing token are required together.")
+        lease = connection.execute(
+            """SELECT worker_id, fencing_token, expires_at
+               FROM cmx_worker_leases
+               WHERE tenant_id=? AND task_id=? AND step_id=?""",
+            (tenant_id, task_id, step_id),
+        ).fetchone()
+        if (
+            lease is None
+            or lease["worker_id"] != worker_id
+            or lease["fencing_token"] != fencing_token
+            or lease["expires_at"] <= now_epoch
+        ):
+            raise WorkflowConflictError("Worker lease is expired, missing or superseded.")
+
     def start_step(
         self,
         task_id: str,
@@ -1062,6 +1098,8 @@ class SQLiteWorkflowStore:
         principal: PrincipalContext | None,
         occurred_at: int | None = None,
         authorization_now_epoch: int | None = None,
+        worker_id: str | None = None,
+        fencing_token: int | None = None,
     ) -> WorkflowStepRecord:
         identity = self._authorize(
             principal, {"workflow:execute", "tasks:write"}, authorization_now_epoch
@@ -1078,6 +1116,10 @@ class SQLiteWorkflowStore:
                 ).fetchone()
                 if plan_row is None or row is None:
                     raise WorkflowNotFoundError("Workflow step was not found in the active tenant.")
+                self._assert_worker_lease(
+                    connection, tenant_id=identity.tenant_id, task_id=task_id, step_id=step_id,
+                    worker_id=worker_id, fencing_token=fencing_token, now_epoch=timestamp,
+                )
                 if row["status"] != "pending":
                     raise WorkflowConflictError("Only a pending step can start.")
                 if row["attempts"] >= row["max_attempts"]:
@@ -1147,6 +1189,8 @@ class SQLiteWorkflowStore:
         principal: PrincipalContext | None,
         occurred_at: int | None = None,
         authorization_now_epoch: int | None = None,
+        worker_id: str | None = None,
+        fencing_token: int | None = None,
     ) -> WorkflowStepRecord:
         identity = self._authorize(
             principal, {"workflow:execute", "tasks:write"}, authorization_now_epoch
@@ -1166,6 +1210,10 @@ class SQLiteWorkflowStore:
                 ).fetchone()
                 if plan_row is None or row is None:
                     raise WorkflowNotFoundError("Workflow step was not found in the active tenant.")
+                self._assert_worker_lease(
+                    connection, tenant_id=identity.tenant_id, task_id=task_id, step_id=step_id,
+                    worker_id=worker_id, fencing_token=fencing_token, now_epoch=timestamp,
+                )
                 if row["status"] != "running":
                     raise WorkflowConflictError("Only a running step can complete.")
                 connection.execute(
@@ -1201,6 +1249,8 @@ class SQLiteWorkflowStore:
         occurred_at: int | None = None,
         allow_pending: bool = False,
         authorization_now_epoch: int | None = None,
+        worker_id: str | None = None,
+        fencing_token: int | None = None,
     ) -> WorkflowStepRecord:
         identity = self._authorize(
             principal, {"workflow:execute", "tasks:write"}, authorization_now_epoch
@@ -1219,6 +1269,10 @@ class SQLiteWorkflowStore:
                 ).fetchone()
                 if plan_row is None or row is None:
                     raise WorkflowNotFoundError("Workflow step was not found in the active tenant.")
+                self._assert_worker_lease(
+                    connection, tenant_id=identity.tenant_id, task_id=task_id, step_id=step_id,
+                    worker_id=worker_id, fencing_token=fencing_token, now_epoch=timestamp,
+                )
                 permitted = {"running"}
                 if allow_pending:
                     permitted.add("pending")
