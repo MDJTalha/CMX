@@ -91,3 +91,13 @@ See docs/roadmap.md for the staged plan, docs/architecture.md for the trust boun
 ### Worker execution safety
 
 Workflow execution uses tenant-scoped SQLite worker leases with monotonically increasing fencing tokens. The coordinator claims a pending step before invoking its handler and requires the same lease token for persisted start/completion/failure transitions. Concurrent coordinator calls leave a step with a live lease untouched. Expired or uncertain work is not automatically replayed. See [worker lease documentation](docs/worker-leases.md) for current limits, including the lack of lease heartbeats and distributed scheduling.
+
+
+
+### Interrupted-work reconciliation and retry authorization
+
+CMX records operator reconciliation reviews for interrupted workflow steps and supports an explicit, audit-only retry-authorization record. The record is bound to the latest `effect_not_applied` review, the immutable plan hash, the pinned capability contract, the attempt budget, dependency completion, current lease state, and any required input-bound approval.
+
+A separate transactional consumption operation can mark an authorization as consumed once. It rejects stale reviews, mismatched workflow evidence, active leases, exhausted attempts, and duplicate consumption. Both authorization and consumption are recorded in the workflow audit chain.
+
+**Safety boundary:** authorization and consumption are not execution. Neither operation resets the interrupted step, claims a worker lease, invokes a handler, or starts a retry. A safe retry executor with external-side-effect idempotency, crash recovery, and provider-specific reconciliation is not yet implemented. Never treat an authorization or consumption event as permission to replay a handler automatically.
