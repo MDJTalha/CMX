@@ -68,6 +68,7 @@ class WorkflowStepRecord(BaseModel):
     ordinal: int = Field(ge=0)
     capability_id: str
     capability_version: str
+    capability_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     status: StepStatus
     attempts: int = Field(ge=0)
     max_attempts: int = Field(ge=1, le=5)
@@ -99,6 +100,7 @@ def _approval_fingerprint(
     plan_hash: str,
     step: PlanStep,
     capability_version: str,
+    capability_fingerprint: str,
 ) -> str:
     body = {
         "tenant_id": tenant_id,
@@ -107,6 +109,7 @@ def _approval_fingerprint(
         "step_id": step.step_id,
         "capability_id": step.capability_id,
         "capability_version": capability_version,
+        "capability_fingerprint": capability_fingerprint,
         "requires_approval": step.requires_approval,
         "max_attempts": step.max_attempts,
         "input_payload": step.input_payload,
@@ -181,6 +184,7 @@ class SQLiteWorkflowStore:
                         ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
                         capability_id TEXT NOT NULL,
                         capability_version TEXT NOT NULL,
+                        capability_fingerprint TEXT NOT NULL CHECK (length(capability_fingerprint) = 64),
                         status TEXT NOT NULL CHECK (
                             status IN ('pending','awaiting_approval','running','succeeded','failed','blocked','interrupted')
                         ),
@@ -424,6 +428,7 @@ class SQLiteWorkflowStore:
                 raise WorkflowIntegrityError("Workflow step output is not valid canonical JSON.") from exc
         return {
             "status": row["status"],
+            "capability_fingerprint": row["capability_fingerprint"],
             "attempts": row["attempts"],
             "error_code": row["error_code"],
             "approval_requested_by": row["approval_requested_by"],
@@ -444,7 +449,7 @@ class SQLiteWorkflowStore:
             connection.execute(
                 """
                 SELECT tenant_id, task_id, step_id, ordinal, capability_id, capability_version,
-                       status, attempts, max_attempts, requires_approval, input_json, output_json,
+                       capability_fingerprint, status, attempts, max_attempts, requires_approval, input_json, output_json,
                        error_code, approval_requested_by, approved_by, approved_at,
                        approval_fingerprint, updated_at
                 FROM cmx_workflow_steps
@@ -563,6 +568,7 @@ class SQLiteWorkflowStore:
             ordinal=row["ordinal"],
             capability_id=row["capability_id"],
             capability_version=row["capability_version"],
+            capability_fingerprint=row["capability_fingerprint"],
             status=row["status"],
             attempts=row["attempts"],
             max_attempts=row["max_attempts"],
@@ -584,6 +590,7 @@ class SQLiteWorkflowStore:
         *,
         principal: PrincipalContext | None,
         capability_versions: Mapping[str, str],
+        capability_fingerprints: Mapping[str, str],
         occurred_at: int | None = None,
         authorization_now_epoch: int | None = None,
     ) -> WorkflowSnapshot:
@@ -597,11 +604,14 @@ class SQLiteWorkflowStore:
         if task.state != TaskState.CREATED or task.version != 0 or task.attempts != 1 or task.last_event is not None:
             raise ValueError("New workflow tasks must start in created state at version 0 and attempt 1.")
         required_caps = {step.capability_id for step in plan.steps}
-        if set(capability_versions) != required_caps:
-            raise ValueError("Capability versions must be supplied for exactly the capabilities in the plan.")
+        if set(capability_versions) != required_caps or set(capability_fingerprints) != required_caps:
+            raise ValueError("Capability versions and fingerprints must cover exactly the plan capabilities.")
         for version in capability_versions.values():
             if not re.fullmatch(r"^\d+\.\d+\.\d+$", version):
                 raise ValueError("Capability versions must use semantic version format.")
+        for fingerprint in capability_fingerprints.values():
+            if not re.fullmatch(r"^[0-9a-f]{64}$", fingerprint):
+                raise ValueError("Capability fingerprints must be lowercase SHA-256 hashes.")
 
         plan_data = plan.model_dump(mode="json")
         plan_json = _canonical_json(plan_data)
@@ -655,15 +665,16 @@ class SQLiteWorkflowStore:
                             """
                             INSERT INTO cmx_workflow_steps (
                                 tenant_id, task_id, step_id, ordinal, capability_id,
-                                capability_version, status, attempts, max_attempts,
+                                capability_version, capability_fingerprint, status, attempts, max_attempts,
                                 requires_approval, input_json, output_json, error_code,
                                 approval_requested_by, approved_by, approved_at,
                                 approval_fingerprint, updated_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?)
                             """,
                             (
                                 identity.tenant_id, task.task_id, step.step_id, ordinal,
                                 step.capability_id, capability_versions[step.capability_id],
+                                capability_fingerprints[step.capability_id],
                                 step.max_attempts, int(step.requires_approval),
                                 _canonical_json(step.input_payload), timestamp,
                             ),
@@ -1004,6 +1015,7 @@ class SQLiteWorkflowStore:
                     plan_hash=plan_row["plan_hash"],
                     step=step_spec,
                     capability_version=row["capability_version"],
+                    capability_fingerprint=row["capability_fingerprint"],
                 )
                 connection.execute(
                     """
@@ -1084,6 +1096,7 @@ class SQLiteWorkflowStore:
                         plan_hash=plan_row["plan_hash"],
                         step=spec,
                         capability_version=row["capability_version"],
+                        capability_fingerprint=row["capability_fingerprint"],
                     )
                     if (
                         row["approved_at"] is None
