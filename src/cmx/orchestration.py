@@ -17,7 +17,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from cmx.idempotency import IdempotencyConflict, SQLiteIdempotencyStore\nfrom cmx.kernel import (
+from cmx.idempotency import IdempotencyConflict, SQLiteIdempotencyStore
+from cmx.kernel import (
     CapabilityRegistry,
     CriterionResult,
     ExecutionPlan,
