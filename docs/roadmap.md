@@ -37,7 +37,8 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Add an opt-in fixed-command subprocess adapter with parent-enforced deadlines, bounded JSON streams and explicit unknown-outcome errors
 - [ ] Add OS-level sandbox/descendant-process supervision, resource quotas and safe retry/idempotency reconciliation
 - [ ] Integrate worker lease fencing into coordinator step transitions and add background scheduling
-- [x] Add SQLite-backed worker reservation records with expiry and monotonically increasing fencing tokens (reservation primitive only; not yet execution-enforced)
+- [x] Add SQLite-backed worker reservation records with expiry and monotonically increasing fencing tokens
+- [x] Add opt-in, transaction-atomic lease checks to workflow step start/complete/fail transitions (coordinator wiring still open)
 - [x] Add file-backed SQLite task persistence, optimistic version checks and transactional audit append tests
 
 ## Phase 3 — Evidence retrieval and model adapters

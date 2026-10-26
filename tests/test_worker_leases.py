@@ -111,3 +111,59 @@ def test_claim_is_tenant_scoped_and_rejects_non_pending_step(tmp_path):
             "task_001", "step_one", worker_id="worker_a", lease_seconds=5,
             principal=principal(), now_epoch=202, authorization_now_epoch=202,
         )
+
+
+
+def test_step_transitions_require_live_matching_lease_when_worker_fields_supplied(tmp_path):
+    task_store, workflow_store = ready_workflow(tmp_path)
+    leases = SQLiteWorkerLeaseStore(task_store)
+    lease = leases.claim(
+        "task_001", "step_one", worker_id="worker_a", lease_seconds=5,
+        principal=principal(), now_epoch=200, authorization_now_epoch=200,
+    )
+    started = workflow_store.start_step(
+        "task_001", "step_one", principal=principal(), occurred_at=202,
+        authorization_now_epoch=202, worker_id=lease.worker_id,
+        fencing_token=lease.fencing_token,
+    )
+    assert started.status == "running"
+    with pytest.raises(Exception, match="lease is expired"):
+        workflow_store.complete_step(
+            "task_001", "step_one", {"result": 3}, principal=principal(),
+            occurred_at=205, authorization_now_epoch=205,
+            worker_id=lease.worker_id, fencing_token=lease.fencing_token,
+        )
+    unchanged = workflow_store.get_workflow(
+        "task_001", principal=principal(), authorization_now_epoch=205,
+    )
+    assert unchanged.steps[0].status == "running"
+
+
+def test_step_transition_rejects_a_superseded_fencing_token(tmp_path):
+    task_store, workflow_store = ready_workflow(tmp_path)
+    leases = SQLiteWorkerLeaseStore(task_store)
+    lease = leases.claim(
+        "task_001", "step_one", worker_id="worker_a", lease_seconds=30,
+        principal=principal(), now_epoch=200, authorization_now_epoch=200,
+    )
+    workflow_store.start_step(
+        "task_001", "step_one", principal=principal(), occurred_at=201,
+        authorization_now_epoch=201, worker_id=lease.worker_id,
+        fencing_token=lease.fencing_token,
+    )
+    with task_store._connection() as connection:
+        connection.execute(
+            """UPDATE cmx_worker_leases SET fencing_token=?
+               WHERE tenant_id=? AND task_id=? AND step_id=?""",
+            (lease.fencing_token + 1, lease.tenant_id, lease.task_id, lease.step_id),
+        )
+    with pytest.raises(Exception, match="lease is expired"):
+        workflow_store.fail_step(
+            "task_001", "step_one", error_code="handler_error", principal=principal(),
+            occurred_at=202, authorization_now_epoch=202,
+            worker_id=lease.worker_id, fencing_token=lease.fencing_token,
+        )
+    unchanged = workflow_store.get_workflow(
+        "task_001", principal=principal(), authorization_now_epoch=202,
+    )
+    assert unchanged.steps[0].status == "running"
