@@ -62,7 +62,7 @@ def test_preflight_validates_payload_and_consumes_ticket_without_dispatch(tmp_pa
     assert result.request_hash == record.request_hash
     assert result.decision.disposition == "retry_candidate"
     assert result.authorization.executor_id == executor.subject_id
-    assert ledger.get(record.idempotency_key, principal=executor, authorization_now_epoch=201).state == "uncertain"
+    assert ledger.get(record.idempotency_key, principal=executor, authorization_now_epoch=201).state == "dispatching"
 
 
 def test_preflight_rejects_payload_mismatch_without_consuming_ticket(tmp_path):
@@ -121,4 +121,35 @@ def test_preflight_does_not_dispatch_external_effects(tmp_path):
         authorization_token=issued.token, principal=executor, now_epoch=201,
     )
     assert result.authorization.authorization_id == issued.authorization_id
-    assert ledger.get(record.idempotency_key, principal=executor, authorization_now_epoch=201).state == "uncertain"
+    assert ledger.get(record.idempotency_key, principal=executor, authorization_now_epoch=201).state == "dispatching"
+
+def test_atomic_recovery_claim_cannot_be_replayed_with_same_ticket(tmp_path):
+    _, ledger, _, _, executor, payload, record, issued, observation, service = setup(tmp_path)
+    first = service.prepare(
+        record.idempotency_key, request_payload=payload, observation=observation,
+        expected_provider_id="provider.test", provider_idempotency_supported=True,
+        authorization_token=issued.token, principal=executor, now_epoch=201,
+    )
+    assert first.operation_id == record.operation_id
+    assert ledger.get(record.idempotency_key, principal=executor, authorization_now_epoch=202).state == "dispatching"
+    with pytest.raises(RecoveryPreflightError, match="not eligible"):
+        service.prepare(
+            record.idempotency_key, request_payload=payload, observation=observation,
+            expected_provider_id="provider.test", provider_idempotency_supported=True,
+            authorization_token=issued.token, principal=executor, now_epoch=202,
+        )
+
+
+def test_atomic_recovery_claim_requires_uncertain_state(tmp_path):
+    _, ledger, _, approver, executor, payload, record, issued, observation, service = setup(tmp_path)
+    ledger.mark_succeeded(
+        record.idempotency_key, {"provider_ref": "already-done"},
+        principal=approver, occurred_at=200, authorization_now_epoch=200,
+    )
+    with pytest.raises(RecoveryPreflightError, match="eligible"):
+        service.prepare(
+            record.idempotency_key, request_payload=payload, observation=observation,
+            expected_provider_id="provider.test", provider_idempotency_supported=True,
+            authorization_token=issued.token, principal=executor, now_epoch=201,
+        )
+
