@@ -184,3 +184,72 @@ def test_jwks_outage_is_not_misreported_as_bad_credentials(tmp_path, monkeypatch
     with pytest.raises(OIDCProviderUnavailable):
         auth.authenticate("signed-token", tenant_id="tenant_alpha", now_epoch=150)
 
+
+def test_real_rs256_signature_and_required_claims_are_verified(tmp_path):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    import time
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    class SigningKey:
+        key = public_key
+    class LocalJwksClient:
+        def get_signing_key_from_jwt(self, token):
+            return SigningKey()
+
+    now = int(time.time())
+    store = OIDCIdentityStore(tmp_path / "real-jwt.sqlite3")
+    store.grant(
+        issuer=ISSUER, subject="idp-subject-123", tenant_id="tenant_alpha",
+        permissions={"workflow:read"}, now_epoch=now,
+    )
+    auth = OIDCAuthenticator(
+        issuer=ISSUER, audience=AUDIENCE, jwks_url=JWKS,
+        identity_store=store, jwks_client=LocalJwksClient(),
+    )
+    token = jwt.encode(
+        {"iss": ISSUER, "aud": AUDIENCE, "sub": "idp-subject-123",
+         "iat": now, "exp": now + 120, "jti": "signed-001"},
+        private_key, algorithm="RS256",
+    )
+    principal = auth.authenticate(token, tenant_id="tenant_alpha", now_epoch=now)
+    assert principal.authentication_verified is True
+    assert principal.permissions == frozenset({"workflow:read"})
+
+
+def test_invalid_rs256_signature_is_rejected(tmp_path):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    import time
+
+    issuer_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    attacker_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = issuer_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    class SigningKey:
+        key = public_key
+    class LocalJwksClient:
+        def get_signing_key_from_jwt(self, token):
+            return SigningKey()
+
+    now = int(time.time())
+    store = OIDCIdentityStore(tmp_path / "bad-jwt.sqlite3")
+    auth = OIDCAuthenticator(
+        issuer=ISSUER, audience=AUDIENCE, jwks_url=JWKS,
+        identity_store=store, jwks_client=LocalJwksClient(),
+    )
+    token = jwt.encode(
+        {"iss": ISSUER, "aud": AUDIENCE, "sub": "idp-subject-123",
+         "iat": now, "exp": now + 120},
+        attacker_key, algorithm="RS256",
+    )
+    with pytest.raises(AuthorizationError) as error:
+        auth.authenticate(token, tenant_id="tenant_alpha", now_epoch=now)
+    assert error.value.code == "invalid_credential"
+
