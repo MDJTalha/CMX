@@ -278,6 +278,50 @@ def test_occurrence_timestamp_cannot_be_used_to_extend_expired_identity(tmp_path
     assert captured.value.code == "identity_expired"
 
 
+def test_out_of_order_audit_timestamp_rolls_back_transition(tmp_path):
+    store = SQLiteTaskStore(tmp_path / "cmx.sqlite3")
+    create(store)
+    with pytest.raises(ValueError, match="must not move backwards"):
+        store.apply_event(
+            "task_001",
+            TaskEvent.PLAN_ACCEPTED,
+            principal=principal(),
+            expected_version=0,
+            occurred_at=149,
+            authorization_now_epoch=150,
+        )
+    current = store.get_task(
+        "task_001", principal=principal(), authorization_now_epoch=150
+    )
+    assert current.state == TaskState.CREATED
+    assert current.version == 0
+    assert len(audit(store)) == 1
+
+
+def test_task_row_tampering_is_detected_on_read_and_transition(tmp_path):
+    path = tmp_path / "cmx.sqlite3"
+    store = SQLiteTaskStore(path)
+    create(store)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE cmx_tasks SET state = 'running' WHERE tenant_id = ? AND task_id = ?",
+            ("tenant_alpha", "task_001"),
+        )
+    with pytest.raises(AuditIntegrityError, match="does not match"):
+        store.get_task(
+            "task_001", principal=principal(), authorization_now_epoch=150
+        )
+    with pytest.raises(AuditIntegrityError, match="does not match"):
+        store.apply_event(
+            "task_001",
+            TaskEvent.PLAN_ACCEPTED,
+            principal=principal(),
+            expected_version=0,
+            occurred_at=151,
+            authorization_now_epoch=150,
+        )
+
+
 def test_new_task_must_start_at_initial_state(tmp_path):
     store = SQLiteTaskStore(tmp_path / "cmx.sqlite3")
     non_initial = TaskRecord(task_id="task_001", state=TaskState.PLANNED)
