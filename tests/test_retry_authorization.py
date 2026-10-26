@@ -134,8 +134,16 @@ def test_issuance_requires_approver_permission(tmp_path):
 
 
 def test_issuance_rejects_terminal_or_changed_durable_record(tmp_path):
-    _, ledger, store, approver, _, record, decision = setup(tmp_path)
-    ledger.mark_succeeded(record.idempotency_key, {"ok": True}, principal=approver,
-                          occurred_at=201, authorization_now_epoch=201)
+    _, ledger, store, approver, _, _, decision = setup(tmp_path)
+    key = hashlib.sha256(b"terminal-operation").hexdigest()
+    terminal, created = ledger.reserve(
+        "task_001:step_terminal", key, {"amount": 7}, principal=approver,
+        occurred_at=160, authorization_now_epoch=160,
+    )
+    assert created
+    ledger.mark_dispatching(key, principal=approver, occurred_at=161, authorization_now_epoch=161)
+    terminal = ledger.mark_succeeded(
+        key, {"ok": True}, principal=approver, occurred_at=162, authorization_now_epoch=162,
+    )
     with pytest.raises(RetryAuthorizationError, match="binding or state"):
-        issue(store, approver, record, decision, now=202)
+        issue(store, approver, terminal, decision, now=202)
