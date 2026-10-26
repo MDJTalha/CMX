@@ -144,3 +144,54 @@ def test_idempotency_audit_chain_detects_mutation(tmp_path):
     from cmx.idempotency import IdempotencyIntegrityError
     with pytest.raises(IdempotencyIntegrityError, match="integrity verification"):
         store.list_events(key, principal=identity, authorization_now_epoch=201)
+
+
+def test_reservation_and_state_transition_roll_back_if_audit_append_fails(tmp_path, monkeypatch):
+    tasks, store = make_store(tmp_path)
+    identity = principal()
+    key = key_for("audit-atomicity")
+
+    def fail_append(*args, **kwargs):
+        raise RuntimeError("simulated audit append failure")
+
+    monkeypatch.setattr(store, "_append_event", fail_append)
+    with pytest.raises(RuntimeError, match="simulated audit append failure"):
+        store.reserve("task_001:step_one", key, {"x": 1},
+                      principal=identity, occurred_at=200, authorization_now_epoch=200)
+    with tasks._connection() as connection:
+        row = connection.execute(
+            "SELECT state FROM cmx_idempotency_operations WHERE tenant_id = ? AND idempotency_key = ?",
+            (identity.tenant_id, key),
+        ).fetchone()
+    assert row is None
+
+    monkeypatch.undo()
+    store.reserve("task_001:step_one", key, {"x": 1},
+                  principal=identity, occurred_at=201, authorization_now_epoch=201)
+    monkeypatch.setattr(store, "_append_event", fail_append)
+    with pytest.raises(RuntimeError, match="simulated audit append failure"):
+        store.mark_dispatching(
+            key, principal=identity, occurred_at=202, authorization_now_epoch=202,
+        )
+    monkeypatch.undo()
+    assert store.get(key, principal=identity, authorization_now_epoch=203).state == "reserved"
+
+
+def test_concurrent_reservations_create_exactly_one_operation(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    _, store = make_store(tmp_path)
+    identity = principal()
+    key = key_for("concurrent-reservation")
+
+    def reserve(index):
+        return store.reserve(
+            "task_001:step_one", key, {"value": "same"},
+            principal=identity, occurred_at=200 + index, authorization_now_epoch=200,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(reserve, range(8)))
+    assert sum(1 for _, created in results if created) == 1
+    assert len({record.operation_id for record, _ in results}) == 1
+    assert len(store.list_events(key, principal=identity, authorization_now_epoch=210)) == 1
