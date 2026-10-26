@@ -1,7 +1,7 @@
 import pytest
 import jwt
 
-from cmx.oidc_auth import OIDCAuthenticator, OIDCConfigurationError, OIDCIdentityStore
+from cmx.oidc_auth import OIDCAuthenticator, OIDCConfigurationError, OIDCIdentityStore, OIDCProviderUnavailable
 from cmx.security import AuthorizationError, authorize_permissions
 
 
@@ -171,3 +171,16 @@ def test_oidc_api_mode_requires_tenant_selector(monkeypatch):
             tenant_id=None,
         )
     assert error.value.status_code == 400
+
+def test_jwks_outage_is_not_misreported_as_bad_credentials(tmp_path, monkeypatch):
+    store = OIDCIdentityStore(tmp_path / "oidc.sqlite3")
+    class OfflineJwksClient:
+        def get_signing_key_from_jwt(self, token):
+            raise jwt.PyJWKClientConnectionError("provider offline")
+    auth = OIDCAuthenticator(
+        issuer=ISSUER, audience=AUDIENCE, jwks_url=JWKS, identity_store=store,
+        jwks_client=OfflineJwksClient(),
+    )
+    with pytest.raises(OIDCProviderUnavailable):
+        auth.authenticate("signed-token", tenant_id="tenant_alpha", now_epoch=150)
+
