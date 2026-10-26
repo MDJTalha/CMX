@@ -8,7 +8,9 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from cmx.schema_validation import validate_json_payload, validate_json_schema
 
 
 class TaskState(StrEnum):
@@ -147,6 +149,12 @@ class CapabilitySpec(BaseModel):
     has_side_effects: bool = False
     approval_required: bool = False
 
+    @field_validator("input_schema", "output_schema")
+    @classmethod
+    def schema_documents_are_valid(cls, value: dict[str, Any]) -> dict[str, Any]:
+        validate_json_schema(value)
+        return value
+
     @model_validator(mode="after")
     def side_effects_require_approval(self) -> "CapabilitySpec":
         if self.has_side_effects and not self.approval_required:
@@ -241,15 +249,52 @@ class CapabilityRegistry:
             )
         return capability
 
+    def validate_input(
+        self,
+        capability_id: str,
+        payload: dict[str, Any],
+        *,
+        granted_permissions: set[str],
+    ) -> CapabilitySpec:
+        """Authorize a capability and validate its input before any execution."""
+        capability = self.authorize(capability_id, granted_permissions)
+        validate_json_payload(
+            capability.input_schema,
+            payload,
+            label=f"Input for capability '{capability_id}'",
+        )
+        return capability
+
+    def validate_output(
+        self,
+        capability_id: str,
+        payload: Any,
+        *,
+        granted_permissions: set[str],
+    ) -> CapabilitySpec:
+        """Authorize a capability and validate its result before accepting it."""
+        capability = self.authorize(capability_id, granted_permissions)
+        validate_json_payload(
+            capability.output_schema,
+            payload,
+            label=f"Output for capability '{capability_id}'",
+        )
+        return capability
+
     def validate_plan(
         self,
         plan: ExecutionPlan,
         *,
         granted_permissions: set[str],
     ) -> None:
-        """Check every step against the allowlist and permission set; execute nothing."""
+        """Check every step, including schema-valid input, without executing anything."""
         for step in plan.steps:
             capability = self.authorize(step.capability_id, granted_permissions)
+            validate_json_payload(
+                capability.input_schema,
+                step.input_payload,
+                label=f"Input for plan step '{step.step_id}'",
+            )
             if capability.approval_required and not step.requires_approval:
                 raise PermissionError(
                     f"Step '{step.step_id}' must explicitly require human approval."

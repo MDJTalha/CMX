@@ -289,3 +289,173 @@ def test_verification_contract_requires_at_least_one_mandatory_criterion():
                 )
             ],
         )
+
+
+from cmx.schema_validation import (
+    CapabilityPayloadValidationError,
+    CapabilitySchemaError,
+    validate_json_payload,
+    validate_json_schema,
+)
+
+
+def strict_object_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {"query": {"type": "string", "minLength": 3}},
+        "required": ["query"],
+        "additionalProperties": False,
+    }
+
+
+def test_capability_rejects_invalid_json_schema():
+    with pytest.raises(ValidationError, match="valid JSON Schema"):
+        capability(input_schema={"type": "not-a-json-schema-type"})
+
+
+def test_capability_rejects_remote_schema_references():
+    with pytest.raises(ValidationError, match="Remote JSON Schema references"):
+        capability(input_schema={"$ref": "https://example.com/schema.json"})
+
+
+def test_json_schema_validation_accepts_local_fragment_references():
+    schema = {
+        "$defs": {"non_empty": {"type": "string", "minLength": 1}},
+        "type": "object",
+        "properties": {"name": {"$ref": "#/$defs/non_empty"}},
+        "required": ["name"],
+        "additionalProperties": False,
+    }
+    validate_json_schema(schema)
+    validate_json_payload(schema, {"name": "CMX"})
+
+
+def test_json_schema_validation_rejects_unresolved_local_references():
+    schema = {"$ref": "#/$defs/not_present"}
+    with pytest.raises(CapabilitySchemaError, match="cannot be resolved"):
+        validate_json_payload(schema, {"name": "CMX"})
+
+
+def test_plan_validation_checks_required_fields_and_types():
+    registry = CapabilityRegistry()
+    registry.register(capability(input_schema=strict_object_schema()))
+    missing_required = plan([
+        PlanStep(
+            step_id="step_one",
+            capability_id="assessment.evaluate",
+            objective="Evaluate the request.",
+            input_payload={},
+        )
+    ])
+    with pytest.raises(CapabilityPayloadValidationError, match="does not match"):
+        registry.validate_plan(missing_required, granted_permissions={"assessment:read"})
+
+    wrong_type = plan([
+        PlanStep(
+            step_id="step_one",
+            capability_id="assessment.evaluate",
+            objective="Evaluate the request.",
+            input_payload={"query": 42},
+        )
+    ])
+    with pytest.raises(CapabilityPayloadValidationError, match="does not match"):
+        registry.validate_plan(wrong_type, granted_permissions={"assessment:read"})
+
+
+def test_plan_validation_rejects_unexpected_input_properties():
+    registry = CapabilityRegistry()
+    registry.register(capability(input_schema=strict_object_schema()))
+    unsafe = plan([
+        PlanStep(
+            step_id="step_one",
+            capability_id="assessment.evaluate",
+            objective="Evaluate the request.",
+            input_payload={"query": "valid query", "admin": True},
+        )
+    ])
+    with pytest.raises(CapabilityPayloadValidationError):
+        registry.validate_plan(unsafe, granted_permissions={"assessment:read"})
+
+
+def test_input_and_output_validation_require_capability_permissions():
+    registry = CapabilityRegistry()
+    registry.register(
+        capability(
+            input_schema=strict_object_schema(),
+            output_schema={"type": "object", "required": ["decision"]},
+        )
+    )
+    with pytest.raises(PermissionError):
+        registry.validate_input(
+            "assessment.evaluate",
+            {"query": "valid query"},
+            granted_permissions=set(),
+        )
+    with pytest.raises(PermissionError):
+        registry.validate_output(
+            "assessment.evaluate",
+            {"decision": "go"},
+            granted_permissions=set(),
+        )
+    registry.validate_input(
+        "assessment.evaluate",
+        {"query": "valid query"},
+        granted_permissions={"assessment:read"},
+    )
+    registry.validate_output(
+        "assessment.evaluate",
+        {"decision": "go"},
+        granted_permissions={"assessment:read"},
+    )
+    with pytest.raises(CapabilityPayloadValidationError):
+        registry.validate_output(
+            "assessment.evaluate",
+            {},
+            granted_permissions={"assessment:read"},
+        )
+
+
+def test_payload_validation_errors_do_not_echo_secret_values():
+    registry = CapabilityRegistry()
+    registry.register(capability(input_schema=strict_object_schema()))
+    unsafe = plan([
+        PlanStep(
+            step_id="step_one",
+            capability_id="assessment.evaluate",
+            objective="Evaluate the request.",
+            input_payload={"query": "valid query", "secret": "credential-value"},
+        )
+    ])
+    with pytest.raises(CapabilityPayloadValidationError) as captured:
+        registry.validate_plan(unsafe, granted_permissions={"assessment:read"})
+    assert "credential-value" not in str(captured.value)
+
+
+def test_schema_documents_are_bounded_by_size_and_depth():
+    schema = {
+        "properties": {"a": {"properties": {"b": {"type": "string"}}}},
+        "deep": _nested_schema(35),
+    }
+    with pytest.raises(CapabilitySchemaError, match="nesting depth"):
+        validate_json_schema(schema)
+
+
+def _nested_schema(levels: int) -> dict:
+    current = {"type": "string"}
+    for _ in range(levels):
+        current = {"properties": {"child": current}}
+    return current
+
+
+def test_payload_depth_and_size_are_bounded():
+    with pytest.raises(CapabilityPayloadValidationError, match="nesting depth"):
+        validate_json_payload({"type": "object"}, _nested_payload(70))
+    with pytest.raises(CapabilityPayloadValidationError, match="encoded size"):
+        validate_json_payload({"type": "string"}, "x" * 270_000)
+
+
+def _nested_payload(levels: int) -> dict:
+    current = "leaf"
+    for _ in range(levels):
+        current = {"child": current}
+    return current

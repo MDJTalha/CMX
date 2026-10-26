@@ -2,7 +2,7 @@
 
 ## Scope of this increment
 
-This repository implements a deterministic, request-scoped decision evaluator and a FastAPI wrapper. It does not yet have persistence, authentication, external model integrations, retrieval, live catalogue feeds, workflow execution or advertising.
+This repository's initial product increment implements a deterministic, request-scoped decision evaluator and a FastAPI wrapper. The dependent draft pull requests add reasoning-kernel and bounded JSON Schema contracts, but they are not yet a production workflow runtime. There is no persistence, authentication, external model integration, retrieval, live catalogue feed, workflow execution or advertising.
 
 ## Request lifecycle
 
