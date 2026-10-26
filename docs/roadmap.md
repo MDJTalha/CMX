@@ -36,7 +36,7 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Bind approval records to plan hash, inputs and capability-contract fingerprint
 - [x] Add an opt-in fixed-command subprocess adapter with parent-enforced deadlines, bounded JSON streams and explicit unknown-outcome errors
 - [ ] Add OS-level sandbox/descendant-process supervision, resource quotas and safe retry/idempotency reconciliation
-- [ ] Add background worker scheduling and deliberate recovery/reconciliation for uncertain outcomes
+- [ ] Add background worker scheduling and full recovery/reconciliation for uncertain outcomes (evidence-backed, audit-only operator review records are implemented; safe workflow-state resolution and retry policy remain open)
 - [x] Bound handler executions per coordinator invocation and allow safe resume on a subsequent call
 - [x] Renew active worker leases during handler execution and reject result commits after heartbeat loss
 - [x] Add SQLite-backed worker reservation records with expiry and monotonically increasing fencing tokens
@@ -76,4 +76,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The worker-lease increment now connects tenant-scoped SQLite reservations to coordinator execution: claims are acquired before starting steps, fencing tokens protect state transitions, and live leases prevent concurrent coordinator calls from interrupting active work. Expired or uncertain leases do not trigger automatic replay because external side effects may be uncertain. Background scheduling, distributed coordination, process-level cancellation and OS-level isolation remain open. See `docs/worker-leases.md`. All draft PRs remain unmerged.
+The coordinator now has the foundations for bounded execution and explicit worker lease fencing. This increment adds a privileged, tenant-scoped reconciliation review record for interrupted steps: reviewers must provide a decision, evidence reference and notes; the review is appended to the hash-chained workflow audit log. It deliberately does not replay the handler or mutate the interrupted step/workflow state. A separate, tested policy for safely resolving state and handling retries is still required. Background scheduling, distributed coordination, process-level cancellation and OS-level isolation remain open. See `docs/worker-leases.md`. All draft PRs remain unmerged.
