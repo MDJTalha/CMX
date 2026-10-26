@@ -10,7 +10,7 @@ from test_worker_leases import principal, ready_workflow
 def reviewer():
     identity = principal()
     return identity.model_copy(update={
-        "permissions": identity.permissions | frozenset({"workflow:reconcile", "audit:write"})
+        "permissions": identity.permissions | frozenset({"workflow:reconcile", "audit:write", "audit:read"})
     })
 
 
