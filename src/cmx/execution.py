@@ -114,8 +114,35 @@ class SubprocessJSONHandler:
                     pass
             return
 
+        SubprocessJSONHandler._terminate_windows_tree(process, grace)
+
+    @staticmethod
+    def _terminate_windows_tree(process: subprocess.Popen[bytes], grace: float) -> None:
+        """Best-effort Windows descendant cleanup using the native taskkill utility.
+
+        This improves cleanup for trusted child processes but is not a security
+        sandbox and does not provide Job Object resource quotas. If taskkill is
+        unavailable or fails, terminate the direct child as a conservative fallback.
+        """
         if process.poll() is not None:
             return
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                shell=False,
+                timeout=max(1.0, min(5.0, grace + 1.0)),
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
+            process.wait(timeout=grace)
+            return
+        except (subprocess.TimeoutExpired, OSError):
+            pass
         try:
             process.terminate()
             process.wait(timeout=grace)
