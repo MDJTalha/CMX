@@ -36,9 +36,9 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Bind approval records to plan hash, inputs and capability-contract fingerprint
 - [x] Add an opt-in fixed-command subprocess adapter with parent-enforced deadlines, bounded JSON streams and explicit unknown-outcome errors
 - [ ] Add OS-level sandbox/descendant-process supervision, resource quotas and safe retry/idempotency reconciliation
-- [ ] Integrate worker lease fencing into coordinator step transitions and add background scheduling
+- [ ] Add lease heartbeats, bounded worker scheduling and deliberate recovery/reconciliation for uncertain outcomes
 - [x] Add SQLite-backed worker reservation records with expiry and monotonically increasing fencing tokens
-- [x] Add opt-in, transaction-atomic lease checks to workflow step start/complete/fail transitions (coordinator wiring still open)
+- [x] Enforce lease fencing in coordinator start/complete/failure transitions and avoid interrupting steps with live leases
 - [x] Add file-backed SQLite task persistence, optimistic version checks and transactional audit append tests
 
 ## Phase 3 — Evidence retrieval and model adapters
@@ -74,4 +74,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The worker-lease increment introduces a tenant-scoped SQLite reservation primitive with atomic claims, expiry, renewal/release and monotonic fencing tokens. It deliberately does not claim to be a complete queue or an execution lock: coordinator integration must enforce fencing tokens before workers can safely execute and commit workflow steps. See `docs/worker-leases.md`. All draft PRs remain unmerged.
+The worker-lease increment now connects tenant-scoped SQLite reservations to coordinator execution: claims are acquired before starting steps, fencing tokens protect state transitions, and live leases prevent concurrent coordinator calls from interrupting active work. Expired or uncertain leases do not trigger automatic replay because external side effects may be uncertain. Heartbeats, background scheduling, distributed coordination and OS-level isolation remain open. See `docs/worker-leases.md`. All draft PRs remain unmerged.

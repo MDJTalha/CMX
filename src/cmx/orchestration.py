@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from uuid import uuid4
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
@@ -30,6 +31,7 @@ from cmx.kernel import (
 from cmx.persistence import SQLiteTaskStore
 from cmx.schema_validation import CapabilityPayloadValidationError
 from cmx.security import AuthorizationError, PrincipalContext, authorize_permissions
+from cmx.worker_leases import SQLiteWorkerLeaseStore, WorkerLeaseConflict
 from cmx.workflow_store import (
     StepApprovalRequired,
     SQLiteWorkflowStore,
@@ -111,6 +113,8 @@ class ExecutionCoordinator:
         self.task_store = task_store
         self.workflow_store = workflow_store
         self.registry = registry
+        self.worker_leases = SQLiteWorkerLeaseStore(task_store)
+        self.worker_id = f"coordinator-{uuid4().hex}"
         self.handlers: dict[str, CapabilityHandler] = {}
         for capability_id, handler in (handlers or {}).items():
             if not callable(handler):
@@ -298,6 +302,16 @@ class ExecutionCoordinator:
         # effect result may be uncertain; require a deliberate investigation/reconciliation.
         in_flight = next((step for step in snapshot.steps if step.status == "running"), None)
         if in_flight is not None:
+            active_lease = self.worker_leases.get_active(
+                task_id, in_flight.step_id, principal=identity,
+                now_epoch=authorization_now_epoch,
+                authorization_now_epoch=authorization_now_epoch,
+            )
+            if active_lease is not None:
+                return self._outcome(
+                    snapshot,
+                    message="A worker currently holds this step lease. No interruption or replay was attempted.",
+                )
             self.workflow_store.interrupt_step(
                 task_id, in_flight.step_id, principal=identity,
                 occurred_at=self._clock(authorization_now_epoch),
@@ -448,11 +462,36 @@ class ExecutionCoordinator:
                 )
                 return self._outcome(failed_snapshot, message="No trusted handler is registered for a required capability.")
 
-            started = self.workflow_store.start_step(
-                task_id, step_id, principal=identity,
-                occurred_at=self._clock(authorization_now_epoch),
-                authorization_now_epoch=authorization_now_epoch,
-            )
+            try:
+                lease = self.worker_leases.claim(
+                    task_id, step_id, worker_id=self.worker_id, lease_seconds=3600,
+                    principal=identity, now_epoch=authorization_now_epoch,
+                    authorization_now_epoch=authorization_now_epoch,
+                )
+            except WorkerLeaseConflict:
+                current = self.workflow_store.get_workflow(
+                    task_id, principal=identity, authorization_now_epoch=authorization_now_epoch
+                )
+                return self._outcome(
+                    current,
+                    message="Another coordinator reserved this step. Execution was left unchanged.",
+                )
+            try:
+                started = self.workflow_store.start_step(
+                    task_id, step_id, principal=identity,
+                    occurred_at=self._clock(authorization_now_epoch),
+                    authorization_now_epoch=authorization_now_epoch,
+                    worker_id=lease.worker_id, fencing_token=lease.fencing_token,
+                )
+            except Exception:
+                try:
+                    self.worker_leases.release(
+                        lease, principal=identity, now_epoch=authorization_now_epoch,
+                        authorization_now_epoch=authorization_now_epoch,
+                    )
+                except WorkerLeaseConflict:
+                    pass
+                raise
             capability = self.registry.get(step.capability_id)
             # JSON round-trips isolate handler-owned values from the immutable plan/snapshot.
             import json
@@ -489,14 +528,18 @@ class ExecutionCoordinator:
                     task_id, step_id, error_code="handler_timeout",
                     principal=identity, occurred_at=self._clock(authorization_now_epoch),
                     authorization_now_epoch=authorization_now_epoch,
+                    worker_id=lease.worker_id, fencing_token=lease.fencing_token,
                 )
+                self._release_lease(lease, identity, authorization_now_epoch)
                 return self._finish_failure(task_id, identity, authorization_now_epoch, "A registered handler timed out.")
             except Exception:
                 self.workflow_store.fail_step(
                     task_id, step_id, error_code="handler_error",
                     principal=identity, occurred_at=self._clock(authorization_now_epoch),
                     authorization_now_epoch=authorization_now_epoch,
+                    worker_id=lease.worker_id, fencing_token=lease.fencing_token,
                 )
+                self._release_lease(lease, identity, authorization_now_epoch)
                 return self._finish_failure(task_id, identity, authorization_now_epoch, "A registered handler failed; details were not persisted.")
 
             try:
@@ -512,16 +555,36 @@ class ExecutionCoordinator:
                     task_id, step_id, error_code="output_validation_failed",
                     principal=identity, occurred_at=self._clock(authorization_now_epoch),
                     authorization_now_epoch=authorization_now_epoch,
+                    worker_id=lease.worker_id, fencing_token=lease.fencing_token,
                 )
+                self._release_lease(lease, identity, authorization_now_epoch)
                 return self._finish_failure(task_id, identity, authorization_now_epoch, "Handler output did not satisfy its declared schema.")
 
             self.workflow_store.complete_step(
                 task_id, step_id, output, principal=identity,
                 occurred_at=self._clock(authorization_now_epoch),
                 authorization_now_epoch=authorization_now_epoch,
+                worker_id=lease.worker_id, fencing_token=lease.fencing_token,
             )
+            self._release_lease(lease, identity, authorization_now_epoch)
 
         return self._finish_success(task_id, identity, authorization_now_epoch)
+
+    def _release_lease(
+        self,
+        lease: Any,
+        principal: PrincipalContext,
+        now_epoch: int | None,
+    ) -> None:
+        """Release a completed lease without masking the step's persisted outcome."""
+        try:
+            self.worker_leases.release(
+                lease, principal=principal, now_epoch=now_epoch,
+                authorization_now_epoch=now_epoch,
+            )
+        except WorkerLeaseConflict:
+            # Expiry/supersession is handled by fenced transitions; never hide the outcome.
+            pass
 
     def _validate_capability_pins(self, snapshot: WorkflowSnapshot) -> None:
         for step in snapshot.steps:
