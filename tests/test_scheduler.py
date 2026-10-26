@@ -133,7 +133,7 @@ def test_worker_heartbeat_extends_live_scheduler_lease(tmp_path):
         connection.execute(
             """UPDATE cmx_scheduler_jobs SET status='running', lease_owner=?,
                lease_until=?, fencing_token=1 WHERE job_id=?""",
-            ("heartbeat_worker", now + 1, job.job_id),
+            ("heartbeat_worker", now + 4, job.job_id),
         )
         row = connection.execute(
             "SELECT * FROM cmx_scheduler_jobs WHERE job_id=?", (job.job_id,)
@@ -143,11 +143,11 @@ def test_worker_heartbeat_extends_live_scheduler_lease(tmp_path):
     lost = threading.Event()
     heartbeat = threading.Thread(
         target=scheduler._renew_loop,
-        args=(running, "heartbeat_worker", 1, stop, lost),
+        args=(running, "heartbeat_worker", 6, stop, lost),
         daemon=True,
     )
     heartbeat.start()
-    time.sleep(0.45)
+    time.sleep(2.2)
     stop.set()
     heartbeat.join(timeout=2)
     with tasks._connection() as connection:
@@ -156,7 +156,7 @@ def test_worker_heartbeat_extends_live_scheduler_lease(tmp_path):
         ).fetchone()["lease_until"]
     assert not heartbeat.is_alive()
     assert not lost.is_set()
-    assert renewed > now + 1
+    assert renewed > now + 4
 
 def test_failed_or_blocked_job_requires_operator_intervention_before_requeue(tmp_path):
     _, tasks_workflow, coordinator, scheduler = setup(tmp_path)
