@@ -432,10 +432,12 @@ def test_payload_validation_errors_do_not_echo_secret_values():
 
 
 def test_schema_documents_are_bounded_by_size_and_depth():
+    schema = {
+        "properties": {"a": {"properties": {"b": {"type": "string"}}}},
+        "deep": _nested_schema(35),
+    }
     with pytest.raises(CapabilitySchemaError, match="nesting depth"):
-        validate_json_schema({"properties": {"a": {"properties": {"b": {"type": "string"}}}} | {
-            "deep": _nested_schema(35)
-        })
+        validate_json_schema(schema)
 
 
 def _nested_schema(levels: int) -> dict:
