@@ -29,7 +29,7 @@ The deterministic decision engine only evaluates candidate records supplied in t
 
 The dependent draft pull-request series includes validated decision contracts, a task lifecycle kernel, bounded JSON Schema validation, tenant-scoped authorization policy, durable SQLite task/audit records, persisted workflow plans and step results, approval gates, and a controlled coordinator that runs explicitly injected handlers in dependency order. The assessment HTTP route now requires a server-issued bearer service credential with the assessment:write permission.
 
-This remains an engineering foundation, not a production autonomous business platform. Service-key authentication does not provide OIDC, human login, MFA, a browser session, rate limiting, managed secrets, production-scale persistence or resource-level tenant enforcement for future stored assessments. No live vendor retrieval, LLM provider or external integration adapter is connected. Never construct PrincipalContext from client-supplied JSON. Handler deadlines are passed as budgets but are not forcibly enforced by the coordinator; side-effect uncertainty after interruption stops automatic replay. SQLite is a single-node reference backend. All changes remain in draft pull requests and require review before merging.
+This remains an engineering foundation, not a production autonomous business platform. Service-key authentication does not provide OIDC, human login, MFA, a browser session, rate limiting, managed secrets, production-scale persistence or resource-level tenant enforcement for future stored assessments. No live vendor retrieval, LLM provider or external integration adapter is connected. Never construct PrincipalContext from client-supplied JSON. The coordinator's default in-process handlers still cannot be forcibly stopped. An opt-in SubprocessJSONHandler adapter now enforces parent-side deadlines and bounds JSON streams for explicitly configured fixed commands; it is process isolation, not an OS sandbox. A timeout means the side-effect outcome is unknown and must not trigger blind replay. SQLite is a single-node reference backend. All changes remain in draft pull requests and require review before merging.
 
 ## Quick start — Windows PowerShell
 
@@ -81,7 +81,7 @@ Example request: examples/assessment.json
 
 ## Roadmap
 
-See docs/roadmap.md for the staged plan and docs/architecture.md for the trust boundary, scoring semantics and known limitations.
+See docs/roadmap.md for the staged plan, docs/architecture.md for the trust boundary and scoring semantics, docs/authorization-model.md for service credentials, and docs/isolated-execution.md for subprocess handler limits.
 
 ## Brand
 

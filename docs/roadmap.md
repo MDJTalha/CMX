@@ -34,7 +34,8 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Add a controlled coordinator for explicitly injected capability handlers and topologically ordered plans
 - [x] Persist immutable workflow plans, step states/results, approvals and hash-chained workflow audit events
 - [x] Bind approval records to plan hash, inputs and capability-contract fingerprint
-- [ ] Enforce handler deadlines with a tested isolation boundary and define safe retry/idempotency policy
+- [x] Add an opt-in fixed-command subprocess adapter with parent-enforced deadlines, bounded JSON streams and explicit unknown-outcome errors
+- [ ] Add OS-level sandbox/descendant-process supervision, resource quotas and safe retry/idempotency reconciliation
 - [ ] Add background worker scheduling and multi-worker claim/lease semantics
 - [x] Add file-backed SQLite task persistence, optimistic version checks and transactional audit append tests
 
@@ -71,4 +72,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The latest authentication increment adds a persistent service credential registry, single-display random bearer key issuance, digest-only secret storage, expiry checks, one-way revocation, a hash-chained issue/revoke event ledger, an operator CLI and HTTP permission enforcement on the assessment evaluator. This is a service-to-service trust boundary, not a human identity system. See docs/authorization-model.md for usage and limitations. All draft PRs remain unmerged.
+The latest execution increment adds an opt-in fixed-command subprocess handler adapter with hard parent-side deadlines, bounded JSON input/output/error streams, explicit environment configuration and safe error codes. A timeout is recorded as an unknown outcome because terminating a process cannot prove that a remote side effect did not occur. This is not a sandbox; OS-level containment and descendant-process supervision remain open. See docs/isolated-execution.md. The preceding authentication increment adds server-side service bearer credentials for the assessment endpoint; it is not a human identity system. All draft PRs remain unmerged.
