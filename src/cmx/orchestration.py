@@ -9,6 +9,7 @@ A persisted step left running after a process interruption is never retried auto
 from __future__ import annotations
 
 import hashlib
+import threading
 import time
 from uuid import uuid4
 from collections.abc import Callable, Mapping
@@ -95,6 +96,57 @@ def _capability_fingerprint(spec: Any) -> str:
         allow_nan=False,
     )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+
+
+class _LeaseHeartbeat:
+    """Renew a worker lease while a synchronous handler is still executing.
+
+    A failed heartbeat is surfaced before any step result is committed. The handler
+    itself is not forcibly cancelled; adapters must enforce their own deadlines.
+    """
+
+    def __init__(self, *, lease_store: SQLiteWorkerLeaseStore, lease: Any,
+                 principal: PrincipalContext, lease_seconds: int,
+                 authorization_now_epoch: int | None, interval_seconds: float) -> None:
+        self.lease_store = lease_store
+        self.lease = lease
+        self.principal = principal
+        self.lease_seconds = lease_seconds
+        self.authorization_now_epoch = authorization_now_epoch
+        self.interval_seconds = max(0.01, interval_seconds)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lost: Exception | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="cmx-lease-heartbeat", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            try:
+                self.lease = self.lease_store.renew(
+                    self.lease, lease_seconds=self.lease_seconds, principal=self.principal,
+                    now_epoch=self.authorization_now_epoch,
+                    authorization_now_epoch=self.authorization_now_epoch,
+                )
+            except Exception as exc:
+                self._lost = exc
+                self._stop.set()
+                return
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(1.0, self.interval_seconds + 0.5))
+
+    def raise_if_lost(self) -> None:
+        if self._lost is not None:
+            raise WorkerLeaseConflict(
+                "Worker lease renewal failed; handler outcome is uncertain and was not committed."
+            ) from self._lost
 
 
 class ExecutionCoordinator:
@@ -462,9 +514,11 @@ class ExecutionCoordinator:
                 )
                 return self._outcome(failed_snapshot, message="No trusted handler is registered for a required capability.")
 
+            capability = self.registry.get(step.capability_id)
+            lease_seconds = min(3600, max(30, capability.timeout_seconds + 15))
             try:
                 lease = self.worker_leases.claim(
-                    task_id, step_id, worker_id=self.worker_id, lease_seconds=3600,
+                    task_id, step_id, worker_id=self.worker_id, lease_seconds=lease_seconds,
                     principal=identity, now_epoch=authorization_now_epoch,
                     authorization_now_epoch=authorization_now_epoch,
                 )
@@ -492,7 +546,6 @@ class ExecutionCoordinator:
                 except WorkerLeaseConflict:
                     pass
                 raise
-            capability = self.registry.get(step.capability_id)
             # JSON round-trips isolate handler-owned values from the immutable plan/snapshot.
             import json
 
@@ -521,9 +574,17 @@ class ExecutionCoordinator:
                 timeout_seconds=capability.timeout_seconds,
                 idempotency_key=idempotency_key,
             )
+            heartbeat = _LeaseHeartbeat(
+                lease_store=self.worker_leases, lease=lease, principal=identity,
+                lease_seconds=lease_seconds, authorization_now_epoch=authorization_now_epoch,
+                interval_seconds=max(1.0, lease_seconds / 3),
+            )
+            heartbeat.start()
             try:
                 output = handler(json.loads(json.dumps(spec.input_payload, allow_nan=False)), dependencies, context)
             except TimeoutError:
+                heartbeat.stop()
+                heartbeat.raise_if_lost()
                 self.workflow_store.fail_step(
                     task_id, step_id, error_code="handler_timeout",
                     principal=identity, occurred_at=self._clock(authorization_now_epoch),
@@ -533,6 +594,8 @@ class ExecutionCoordinator:
                 self._release_lease(lease, identity, authorization_now_epoch)
                 return self._finish_failure(task_id, identity, authorization_now_epoch, "A registered handler timed out.")
             except Exception:
+                heartbeat.stop()
+                heartbeat.raise_if_lost()
                 self.workflow_store.fail_step(
                     task_id, step_id, error_code="handler_error",
                     principal=identity, occurred_at=self._clock(authorization_now_epoch),
@@ -542,6 +605,8 @@ class ExecutionCoordinator:
                 self._release_lease(lease, identity, authorization_now_epoch)
                 return self._finish_failure(task_id, identity, authorization_now_epoch, "A registered handler failed; details were not persisted.")
 
+            heartbeat.stop()
+            heartbeat.raise_if_lost()
             try:
                 self.registry.validate_output(
                     step.capability_id,

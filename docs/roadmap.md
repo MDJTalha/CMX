@@ -36,7 +36,8 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Bind approval records to plan hash, inputs and capability-contract fingerprint
 - [x] Add an opt-in fixed-command subprocess adapter with parent-enforced deadlines, bounded JSON streams and explicit unknown-outcome errors
 - [ ] Add OS-level sandbox/descendant-process supervision, resource quotas and safe retry/idempotency reconciliation
-- [ ] Add lease heartbeats, bounded worker scheduling and deliberate recovery/reconciliation for uncertain outcomes
+- [ ] Add bounded worker scheduling and deliberate recovery/reconciliation for uncertain outcomes
+- [x] Renew active worker leases during handler execution and reject result commits after heartbeat loss
 - [x] Add SQLite-backed worker reservation records with expiry and monotonically increasing fencing tokens
 - [x] Enforce lease fencing in coordinator start/complete/failure transitions and avoid interrupting steps with live leases
 - [x] Add file-backed SQLite task persistence, optimistic version checks and transactional audit append tests
@@ -74,4 +75,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The worker-lease increment now connects tenant-scoped SQLite reservations to coordinator execution: claims are acquired before starting steps, fencing tokens protect state transitions, and live leases prevent concurrent coordinator calls from interrupting active work. Expired or uncertain leases do not trigger automatic replay because external side effects may be uncertain. Heartbeats, background scheduling, distributed coordination and OS-level isolation remain open. See `docs/worker-leases.md`. All draft PRs remain unmerged.
+The worker-lease increment now connects tenant-scoped SQLite reservations to coordinator execution: claims are acquired before starting steps, fencing tokens protect state transitions, and live leases prevent concurrent coordinator calls from interrupting active work. Expired or uncertain leases do not trigger automatic replay because external side effects may be uncertain. Background scheduling, distributed coordination, process-level cancellation and OS-level isolation remain open. See `docs/worker-leases.md`. All draft PRs remain unmerged.

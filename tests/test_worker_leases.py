@@ -1,4 +1,7 @@
 import pytest
+import threading
+
+from cmx.orchestration import _LeaseHeartbeat
 
 from cmx.kernel import CapabilityRegistry, CapabilitySpec, ExecutionPlan, PlanStep
 from cmx.orchestration import ExecutionCoordinator
@@ -235,3 +238,55 @@ def test_coordinator_fences_normal_step_execution_and_releases_lease(tmp_path):
         "task_001", "step_one", principal=principal(), now_epoch=202,
         authorization_now_epoch=202,
     ) is None
+
+
+def test_lease_heartbeat_renews_until_stopped(tmp_path, monkeypatch):
+    task_store, _ = ready_workflow(tmp_path)
+    leases = SQLiteWorkerLeaseStore(task_store)
+    lease = leases.claim(
+        "task_001", "step_one", worker_id="worker_heartbeat", lease_seconds=30,
+        principal=principal(), now_epoch=200, authorization_now_epoch=200,
+    )
+    renewed = threading.Event()
+    original_renew = leases.renew
+
+    def observed_renew(*args, **kwargs):
+        result = original_renew(*args, **kwargs)
+        renewed.set()
+        return result
+
+    monkeypatch.setattr(leases, "renew", observed_renew)
+    heartbeat = _LeaseHeartbeat(
+        lease_store=leases, lease=lease, principal=principal(), lease_seconds=30,
+        authorization_now_epoch=200, interval_seconds=0.01,
+    )
+    heartbeat.start()
+    assert renewed.wait(timeout=1.0)
+    heartbeat.stop()
+    heartbeat.raise_if_lost()
+    assert heartbeat.lease.fencing_token == lease.fencing_token
+
+
+def test_lease_heartbeat_loss_is_reported_before_result_commit(tmp_path, monkeypatch):
+    task_store, _ = ready_workflow(tmp_path)
+    leases = SQLiteWorkerLeaseStore(task_store)
+    lease = leases.claim(
+        "task_001", "step_one", worker_id="worker_lost", lease_seconds=30,
+        principal=principal(), now_epoch=200, authorization_now_epoch=200,
+    )
+    attempted = threading.Event()
+
+    def fail_renew(*args, **kwargs):
+        attempted.set()
+        raise WorkerLeaseConflict("simulated supersession")
+
+    monkeypatch.setattr(leases, "renew", fail_renew)
+    heartbeat = _LeaseHeartbeat(
+        lease_store=leases, lease=lease, principal=principal(), lease_seconds=30,
+        authorization_now_epoch=200, interval_seconds=0.01,
+    )
+    heartbeat.start()
+    assert attempted.wait(timeout=1.0)
+    heartbeat.stop()
+    with pytest.raises(WorkerLeaseConflict, match="outcome is uncertain"):
+        heartbeat.raise_if_lost()

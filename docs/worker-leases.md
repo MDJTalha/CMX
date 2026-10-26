@@ -2,19 +2,16 @@
 
 ## Current scope
 
-`SQLiteWorkerLeaseStore` provides durable, tenant-scoped reservations for pending workflow steps. SQLite's `BEGIN IMMEDIATE` transaction serializes competing claims on the same database. A claim records a worker ID, expiry and monotonically increasing fencing token. An expired claim can be reassigned; the token increases so stale owners can be rejected by any downstream component that checks it. Renewal and release require the exact current owner and token. The workflow store also exposes optional worker-ID/fencing-token checks on step start, completion and failure; when supplied, the lease is checked inside the same SQLite transaction as the state transition.
+`SQLiteWorkerLeaseStore` provides durable, tenant-scoped reservations for pending workflow steps. SQLite's `BEGIN IMMEDIATE` serializes competing claims on the same database. Each claim records a worker ID, expiry and monotonically increasing fencing token. Renewal and release require the exact current owner and token. The coordinator claims before starting a step, passes the token to state transitions, and renews the lease in a background heartbeat while the synchronous handler runs.
+
+## Safety behavior
+
+- A second coordinator leaves a running step alone while its lease is active.
+- If lease renewal fails, the coordinator does not commit a handler result. The running step remains an uncertain outcome and requires deliberate reconciliation.
+- A missing or expired lease never causes automatic replay of a step that was already running; external side effects may have happened.
+- Capability handlers/adapters must enforce their declared deadline. The heartbeat keeps the reservation alive but does not cancel or sandbox an in-process handler.
+- The lease duration is bounded to 30–3600 seconds and is derived from the capability timeout plus a safety margin. Heartbeat renewal uses the same fencing token.
 
 ## Important limits
 
-This is a **reservation primitive, not a complete background worker system**. It is not yet wired into `ExecutionCoordinator`. The store-level transition checks are opt-in; legacy coordinator calls do not yet supply tokens, so this is not yet an enforced execution lock. The next increment must pass fencing tokens through the coordinator's start/complete/fail paths and handle active claims without incorrectly treating a live worker as interrupted.
-
-SQLite is a single-node reference backend. `BEGIN IMMEDIATE` provides local database serialization, not a distributed lease service for independently hosted nodes sharing an unreliable network filesystem. Multi-node deployments should use a database and locking model designed for that topology.
-
-Lease expiry is not proof that a previous handler stopped or that an external side effect did not happen. A reclaimed lease must not trigger blind replay. Reconcile external state with a stable idempotency key before retrying side-effecting work.
-
-
-## Coordinator integration
-
-The execution coordinator now creates a unique worker identity, atomically claims a pending step before starting it, and passes the lease's worker ID and fencing token into start, completion and handler-failure transitions. A second coordinator that sees a running step with a live lease returns the current running outcome instead of marking it interrupted. A running step with no live lease remains an uncertain outcome and is interrupted without automatic replay.
-
-The coordinator currently requests the maximum supported one-hour lease. Automatic lease heartbeats and hard cancellation of in-process handlers are not implemented; if a handler outlives its lease, fenced completion is rejected and the step must be reconciled deliberately. This remains a single-node SQLite coordination design, not a distributed queue or OS-level sandbox.
+This is still a single-node SQLite coordination design, not a distributed queue. SQLite's local write serialization is not a distributed lease service for independent nodes or unreliable network filesystems. Background scheduling, process-level cancellation, OS sandboxing, resource quotas, and safe reconciliation of external side effects remain open work. Do not blindly replay uncertain operations; use stable idempotency keys and reconcile external state first.
