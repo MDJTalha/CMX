@@ -136,6 +136,50 @@ def test_capability_permission_requirements_are_enforced():
     ).capability_id == "assessment.evaluate"
 
 
+def test_registry_denies_missing_trusted_principal():
+    registry = CapabilityRegistry()
+    registry.register(capability())
+    with pytest.raises(AuthorizationError) as captured:
+        registry.authorize(
+            "assessment.evaluate",
+            principal=None,
+            resource_tenant_id="tenant_alpha",
+            now_epoch=150,
+        )
+    assert captured.value.code == "unauthenticated"
+
+
+def test_registry_denies_expired_principal_context():
+    registry = CapabilityRegistry()
+    registry.register(capability())
+    with pytest.raises(AuthorizationError) as captured:
+        registry.authorize(
+            "assessment.evaluate",
+            principal=make_principal(),
+            resource_tenant_id="tenant_alpha",
+            now_epoch=200,
+        )
+    assert captured.value.code == "identity_expired"
+
+
+def test_registry_denies_cross_tenant_principal_context():
+    registry = CapabilityRegistry()
+    registry.register(capability())
+    with pytest.raises(AuthorizationError) as captured:
+        registry.authorize(
+            "assessment.evaluate",
+            principal=make_principal(),
+            resource_tenant_id="tenant_beta",
+            now_epoch=150,
+        )
+    assert captured.value.code == "tenant_mismatch"
+
+
+def test_capability_rejects_malformed_permission_policy():
+    with pytest.raises(ValidationError, match="invalid permission key"):
+        capability(required_permissions=["Admin:*"])
+
+
 def test_plan_rejects_unknown_dependencies():
     with pytest.raises(ValidationError, match="unknown dependencies"):
         plan([
