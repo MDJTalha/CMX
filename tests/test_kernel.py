@@ -189,3 +189,103 @@ def test_plan_validates_permissions_without_executing_actions():
 def test_task_record_rejects_attempts_above_limit():
     with pytest.raises(ValidationError, match="cannot exceed"):
         TaskRecord(task_id="task_001", attempts=3, max_attempts=2)
+
+
+from cmx.kernel import (
+    CriterionResult,
+    VerificationContract,
+    VerificationCriterion,
+    evaluate_verification,
+)
+
+
+def verification_contract() -> VerificationContract:
+    return VerificationContract(
+        contract_id="verify_001",
+        objective="Verify the task result against acceptance criteria.",
+        criteria=[
+            VerificationCriterion(
+                criterion_id="output_valid",
+                description="The output matches the documented schema.",
+                mandatory=True,
+            ),
+            VerificationCriterion(
+                criterion_id="constraints_met",
+                description="All mandatory user constraints are satisfied.",
+                mandatory=True,
+            ),
+            VerificationCriterion(
+                criterion_id="report_complete",
+                description="An optional human-readable report is included.",
+                mandatory=False,
+            ),
+        ],
+    )
+
+
+def test_verification_passes_only_when_all_mandatory_criteria_pass():
+    decision = evaluate_verification(
+        verification_contract(),
+        [
+            CriterionResult(criterion_id="output_valid", outcome="passed"),
+            CriterionResult(criterion_id="constraints_met", outcome="passed"),
+            CriterionResult(criterion_id="report_complete", outcome="unknown"),
+        ],
+    )
+    assert decision.status == "passed"
+    assert decision.unresolved_criteria == ["report_complete"]
+
+
+def test_missing_mandatory_evidence_blocks_success():
+    decision = evaluate_verification(
+        verification_contract(),
+        [CriterionResult(criterion_id="output_valid", outcome="passed")],
+    )
+    assert decision.status == "blocked"
+    assert "constraints_met" in decision.unresolved_criteria
+
+
+def test_failed_mandatory_criterion_fails_verification():
+    decision = evaluate_verification(
+        verification_contract(),
+        [
+            CriterionResult(criterion_id="output_valid", outcome="passed"),
+            CriterionResult(criterion_id="constraints_met", outcome="failed"),
+        ],
+    )
+    assert decision.status == "failed"
+    assert decision.failed_criteria == ["constraints_met"]
+
+
+def test_verification_rejects_duplicate_result_ids():
+    with pytest.raises(ValueError, match="must be unique"):
+        evaluate_verification(
+            verification_contract(),
+            [
+                CriterionResult(criterion_id="output_valid", outcome="passed"),
+                CriterionResult(criterion_id="output_valid", outcome="passed"),
+            ],
+        )
+
+
+def test_verification_rejects_results_for_unknown_criteria():
+    with pytest.raises(ValueError, match="unknown criteria"):
+        evaluate_verification(
+            verification_contract(),
+            [CriterionResult(criterion_id="made_up", outcome="passed")],
+        )
+
+
+def test_verification_contract_requires_at_least_one_mandatory_criterion():
+    with pytest.raises(ValidationError, match="at least one"):
+        VerificationContract(
+            contract_id="verify_002",
+            objective="Verify a sample task.",
+            criteria=[
+                VerificationCriterion(
+                    criterion_id="optional_check",
+                    description="An optional check with no required outcome.",
+                    mandatory=False,
+                )
+            ],
+        )
