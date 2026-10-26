@@ -20,6 +20,83 @@ class SQLiteWorkflowReconciler:
         self.workflow_store = workflow_store
         self.task_store = workflow_store.task_store
 
+
+    def inspect_uncertain_steps(
+        self,
+        task_id: str,
+        *,
+        principal: PrincipalContext,
+        authorization_now_epoch: int | None = None,
+    ) -> list[dict[str, object]]:
+        """Return a tenant-scoped inventory without changing workflow state or invoking handlers.
+
+        A running step with a live lease is omitted because it is still owned by a worker.
+        Interrupted steps are always visible, but are marked non-actionable while a lease
+        remains live. The latest recorded reconciliation review is included when present.
+        """
+        identity = self.workflow_store._authorize(
+            principal, {"workflow:read", "tasks:read", "audit:read"},
+            authorization_now_epoch,
+        )
+        _validate_identifier(task_id, "task_id")
+        now_epoch = _timestamp(authorization_now_epoch)
+        inventory: list[dict[str, object]] = []
+        with self.task_store._connection() as connection:
+            self.workflow_store._assert_workflow_integrity(connection, identity.tenant_id, task_id)
+            plan_row = self.workflow_store._plan_row(connection, identity.tenant_id, task_id)
+            if plan_row is None:
+                raise WorkflowNotFoundError("Workflow was not found in the active tenant.")
+            steps = connection.execute(
+                """SELECT step_id, status, error_code, updated_at
+                   FROM cmx_workflow_steps
+                   WHERE tenant_id = ? AND task_id = ?
+                     AND status IN ('running', 'interrupted')
+                   ORDER BY ordinal""",
+                (identity.tenant_id, task_id),
+            ).fetchall()
+            events = self.workflow_store._event_rows(connection, identity.tenant_id, task_id)
+            reviews_by_step: dict[str, dict[str, object]] = {}
+            for event in events:
+                if event["event_type"] != "step.reconciliation_recorded":
+                    continue
+                payload = self.workflow_store._decode_event_payload(event)
+                step_id = payload.get("step_id")
+                details = payload.get("details")
+                if isinstance(step_id, str) and isinstance(details, dict):
+                    reviews_by_step[step_id] = {
+                        "event_id": event["event_id"],
+                        "occurred_at": event["occurred_at"],
+                        "recorded_by": event["actor_id"],
+                        "decision": details.get("decision"),
+                        "evidence_reference": details.get("evidence_reference"),
+                        "notes": details.get("notes"),
+                    }
+            for step in steps:
+                lease = connection.execute(
+                    """SELECT expires_at FROM cmx_worker_leases
+                       WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
+                    (identity.tenant_id, task_id, step["step_id"]),
+                ).fetchone()
+                lease_state = (
+                    "missing" if lease is None
+                    else "active" if lease["expires_at"] > now_epoch
+                    else "expired"
+                )
+                if step["status"] == "running" and lease_state == "active":
+                    continue
+                inventory.append({
+                    "task_id": task_id,
+                    "step_id": step["step_id"],
+                    "step_status": step["status"],
+                    "error_code": step["error_code"],
+                    "updated_at": step["updated_at"],
+                    "lease_state": lease_state,
+                    "actionable": lease_state != "active",
+                    "latest_review": reviews_by_step.get(step["step_id"]),
+                    "automatic_replay": False,
+                })
+        return inventory
+
     def record_review(
         self, task_id: str, step_id: str, *,
         decision: ReconciliationDecision, evidence_reference: str, notes: str,

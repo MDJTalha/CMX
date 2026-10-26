@@ -107,3 +107,47 @@ def test_future_audit_timestamp_cannot_bypass_live_lease(tmp_path):
             evidence_reference="ticket:CMX-3", notes="Attempted with a future audit timestamp.",
             principal=identity, occurred_at=400, authorization_now_epoch=210,
         )
+
+
+
+def test_inventory_exposes_uncertain_step_and_latest_review_without_mutation(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    before = store.get_workflow("task_001", principal=identity, authorization_now_epoch=210)
+    initial = reconciler.inspect_uncertain_steps(
+        "task_001", principal=identity, authorization_now_epoch=210,
+    )
+    assert len(initial) == 1
+    assert initial[0]["step_id"] == "step_one"
+    assert initial[0]["step_status"] == "interrupted"
+    assert initial[0]["lease_state"] == "expired"
+    assert initial[0]["actionable"] is True
+    assert initial[0]["latest_review"] is None
+
+    reconciler.record_review(
+        "task_001", "step_one", decision="inconclusive",
+        evidence_reference="ticket:CMX-4", notes="Provider outcome still being investigated.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    reviewed = reconciler.inspect_uncertain_steps(
+        "task_001", principal=identity, authorization_now_epoch=210,
+    )
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=210)
+    assert reviewed[0]["latest_review"]["decision"] == "inconclusive"
+    assert reviewed[0]["latest_review"]["evidence_reference"] == "ticket:CMX-4"
+    assert before.steps[0].status == after.steps[0].status == "interrupted"
+    assert before.workflow_state == after.workflow_state
+
+
+def test_inventory_marks_interrupted_step_non_actionable_with_live_lease(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    with store.task_store._connection() as connection:
+        connection.execute(
+            "UPDATE cmx_worker_leases SET expires_at = 300 WHERE tenant_id = ? AND task_id = ? AND step_id = ?",
+            (identity.tenant_id, "task_001", "step_one"),
+        )
+    result = SQLiteWorkflowReconciler(store).inspect_uncertain_steps(
+        "task_001", principal=identity, authorization_now_epoch=210,
+    )
+    assert result[0]["lease_state"] == "active"
+    assert result[0]["actionable"] is False
