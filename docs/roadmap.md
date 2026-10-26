@@ -36,7 +36,7 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Bind approval records to plan hash, inputs and capability-contract fingerprint
 - [x] Add an opt-in fixed-command subprocess adapter with parent-enforced deadlines, bounded JSON streams and explicit unknown-outcome errors
 - [ ] Add OS-level sandbox/descendant-process supervision, resource quotas and safe retry/idempotency reconciliation
-- [ ] Add background worker scheduling and full recovery/reconciliation for uncertain outcomes (evidence-backed, audit-only operator review records are implemented; safe workflow-state resolution and retry policy remain open)
+- [ ] Add background worker scheduling and full recovery/reconciliation for uncertain outcomes (evidence-backed, audit-only operator reviews and a read-only uncertain-step inventory are implemented; safe workflow-state resolution and retry policy remain open)
 - [x] Bound handler executions per coordinator invocation and allow safe resume on a subsequent call
 - [x] Renew active worker leases during handler execution and reject result commits after heartbeat loss
 - [x] Add SQLite-backed worker reservation records with expiry and monotonically increasing fencing tokens
@@ -76,4 +76,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The coordinator now has the foundations for bounded execution and explicit worker lease fencing. This increment adds a privileged, tenant-scoped reconciliation review record for interrupted steps: reviewers must provide a decision, evidence reference and notes; the review is appended to the hash-chained workflow audit log. It deliberately does not replay the handler or mutate the interrupted step/workflow state. A separate, tested policy for safely resolving state and handling retries is still required. Background scheduling, distributed coordination, process-level cancellation and OS-level isolation remain open. See `docs/worker-leases.md`. All draft PRs remain unmerged.
+The coordinator now has the foundations for bounded execution and explicit worker lease fencing. This increment adds privileged, tenant-scoped reconciliation reviews for interrupted steps and a read-only inventory that exposes lease state and the latest review. Reviewers must provide a decision, evidence reference and notes; reviews are appended to the hash-chained workflow audit log. A follow-up hardening change uses the trusted authorization clock for lease checks, never caller-supplied audit timestamps. These operations deliberately do not replay handlers or mutate interrupted step/workflow state. A separate, tested policy for safely resolving state and handling retries is still required. Background scheduling, distributed coordination, process-level cancellation and OS-level isolation remain open. See `docs/worker-leases.md`. All draft PRs remain unmerged.
