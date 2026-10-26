@@ -362,6 +362,8 @@ class ExecutionCoordinator:
             snapshot = self.workflow_store.get_workflow(
                 task_id, principal=identity, authorization_now_epoch=authorization_now_epoch
             )
+            # Re-check every pinned contract before each handler call, not only at run start.
+            self._validate_capability_pins(snapshot)
             step_by_id = {step.step_id: step for step in snapshot.steps}
             step = step_by_id[step_id]
             spec = specs[step_id]
