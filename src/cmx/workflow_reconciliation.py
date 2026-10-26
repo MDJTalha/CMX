@@ -462,6 +462,10 @@ class SQLiteWorkflowReconciler:
                         "workflow_resumed": False,
                     },
                 )
+                task_state = self._mark_task_failed_in_transaction(
+                    connection, tenant_id=identity.tenant_id, task_id=task_id,
+                    actor_id=identity.subject_id, occurred_at=timestamp,
+                )
                 final = connection.execute(
                     """SELECT * FROM cmx_workflow_steps
                        WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
