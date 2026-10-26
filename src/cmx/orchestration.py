@@ -316,8 +316,11 @@ class ExecutionCoordinator:
         *,
         principal: PrincipalContext,
         authorization_now_epoch: int | None = None,
+        max_steps: int = 10,
     ) -> ExecutionOutcome:
-        """Run in topological order until success, explicit approval, or a safe failure."""
+        """Run at most max_steps handlers, pausing safely when the budget is spent."""
+        if isinstance(max_steps, bool) or not isinstance(max_steps, int) or not 1 <= max_steps <= 100:
+            raise ValueError("max_steps must be an integer from 1 through 100.")
         identity = self._authorize_execution(principal, now_epoch=authorization_now_epoch)
         snapshot = self.workflow_store.get_workflow(
             task_id, principal=identity, authorization_now_epoch=authorization_now_epoch
@@ -423,6 +426,7 @@ class ExecutionCoordinator:
 
         ordered_ids = self._topological_order(snapshot.plan)
         specs = {step.step_id: step for step in snapshot.plan.steps}
+        executed_this_run = 0
 
         for step_id in ordered_ids:
             snapshot = self.workflow_store.get_workflow(
@@ -632,6 +636,19 @@ class ExecutionCoordinator:
                 worker_id=lease.worker_id, fencing_token=lease.fencing_token,
             )
             self._release_lease(lease, identity, authorization_now_epoch)
+            executed_this_run += 1
+            if executed_this_run >= max_steps:
+                current = self.workflow_store.get_workflow(
+                    task_id, principal=identity, authorization_now_epoch=authorization_now_epoch
+                )
+                if any(item.status != "succeeded" for item in current.steps):
+                    return self._outcome(
+                        current,
+                        message=(
+                            f"Execution budget reached after {executed_this_run} step(s). "
+                            "Invoke the coordinator again to resume pending work."
+                        ),
+                    )
 
         return self._finish_success(task_id, identity, authorization_now_epoch)
 

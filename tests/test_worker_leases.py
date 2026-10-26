@@ -290,3 +290,75 @@ def test_lease_heartbeat_loss_is_reported_before_result_commit(tmp_path, monkeyp
     heartbeat.stop()
     with pytest.raises(WorkerLeaseConflict, match="outcome is uncertain"):
         heartbeat.raise_if_lost()
+
+
+def test_coordinator_respects_step_budget_and_resumes_on_next_invocation(tmp_path):
+    task_store = SQLiteTaskStore(tmp_path / "bounded.sqlite3")
+    workflow_store = SQLiteWorkflowStore(task_store)
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Bounded coordinator execution test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    calls = []
+    coordinator = ExecutionCoordinator(
+        task_store=task_store, workflow_store=workflow_store, registry=registry,
+        handlers={"demo.transform": lambda payload, deps, ctx: calls.append(ctx.step_id) or {"result": payload["value"]}},
+    )
+    plan = ExecutionPlan(
+        plan_id="plan_bounded", objective="Exercise a per-invocation execution budget.",
+        steps=[
+            PlanStep(step_id="step_one", capability_id="demo.transform",
+                     objective="First bounded step.", input_payload={"value": 1}),
+            PlanStep(step_id="step_two", capability_id="demo.transform",
+                     objective="Second bounded step.", input_payload={"value": 2}),
+        ],
+    )
+    coordinator.submit("task_bounded", plan, principal=principal(), occurred_at=150,
+                       authorization_now_epoch=150)
+    first = coordinator.run_until_blocked(
+        "task_bounded", principal=principal(), authorization_now_epoch=200, max_steps=1,
+    )
+    snapshot = workflow_store.get_workflow(
+        "task_bounded", principal=principal(), authorization_now_epoch=200,
+    )
+    assert first.status == "running"
+    assert "Execution budget reached" in first.message
+    assert [step.status for step in snapshot.steps] == ["succeeded", "pending"]
+    assert calls == ["step_one"]
+
+    second = coordinator.run_until_blocked(
+        "task_bounded", principal=principal(), authorization_now_epoch=201, max_steps=1,
+    )
+    final = workflow_store.get_workflow(
+        "task_bounded", principal=principal(), authorization_now_epoch=201,
+    )
+    assert second.status == "succeeded"
+    assert [step.status for step in final.steps] == ["succeeded", "succeeded"]
+    assert calls == ["step_one", "step_two"]
+
+
+def test_coordinator_rejects_unbounded_or_invalid_step_budget(tmp_path):
+    task_store, workflow_store = ready_workflow(tmp_path)
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    coordinator = ExecutionCoordinator(
+        task_store=task_store, workflow_store=workflow_store, registry=registry, handlers={},
+    )
+    with pytest.raises(ValueError, match="max_steps"):
+        coordinator.run_until_blocked("task_001", principal=principal(), max_steps=0)
+    with pytest.raises(ValueError, match="max_steps"):
+        coordinator.run_until_blocked("task_001", principal=principal(), max_steps=101)
