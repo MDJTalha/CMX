@@ -36,7 +36,8 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Bind approval records to plan hash, inputs and capability-contract fingerprint
 - [x] Add an opt-in fixed-command subprocess adapter with parent-enforced deadlines, bounded JSON streams and explicit unknown-outcome errors
 - [ ] Add OS-level sandbox/descendant-process supervision, resource quotas and safe retry/idempotency reconciliation
-- [ ] Add bounded worker scheduling and deliberate recovery/reconciliation for uncertain outcomes
+- [ ] Add background worker scheduling and deliberate recovery/reconciliation for uncertain outcomes
+- [x] Bound handler executions per coordinator invocation and allow safe resume on a subsequent call
 - [x] Renew active worker leases during handler execution and reject result commits after heartbeat loss
 - [x] Add SQLite-backed worker reservation records with expiry and monotonically increasing fencing tokens
 - [x] Enforce lease fencing in coordinator start/complete/failure transitions and avoid interrupting steps with live leases
