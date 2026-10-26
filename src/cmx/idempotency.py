@@ -331,6 +331,39 @@ class SQLiteIdempotencyStore:
                 raise LookupError("Idempotency operation was not found in the active tenant.")
             return self._record(row)
 
+    def list_recovery_candidates(
+        self, *, principal: PrincipalContext, limit: int = 100,
+        authorization_now_epoch: int | None = None,
+    ) -> tuple[IdempotencyRecord, ...]:
+        """Return this tenant's non-terminal operations for manual recovery review.
+
+        This method is intentionally read-only. It validates each candidate's
+        hash-chained event history before returning it and never authorizes replay,
+        changes operation state, or exposes another tenant's records.
+        """
+        self._authorize(
+            principal, tenant_id=principal.tenant_id,
+            now_epoch=authorization_now_epoch, write=False,
+        )
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer between 1 and 500.")
+        with self.task_store._connection() as connection:
+            rows = connection.execute(
+                """SELECT * FROM cmx_idempotency_operations
+                   WHERE tenant_id = ? AND state != 'succeeded'
+                   ORDER BY updated_at ASC, idempotency_key ASC LIMIT ?""",
+                (principal.tenant_id, limit),
+            ).fetchall()
+        records = tuple(self._record(row) for row in rows)
+        # Fail closed: a recovery inventory must not present corrupted records as
+        # trustworthy operator evidence.
+        for record in records:
+            self.list_events(
+                record.idempotency_key, principal=principal,
+                authorization_now_epoch=authorization_now_epoch,
+            )
+        return records
+
     def list_events(self, key: str, *, principal: PrincipalContext, authorization_now_epoch: int | None = None) -> tuple[IdempotencyEvent, ...]:
         self._authorize(principal, tenant_id=principal.tenant_id, now_epoch=authorization_now_epoch, write=False)
         if not isinstance(key, str) or not _KEY_RE.fullmatch(key):
