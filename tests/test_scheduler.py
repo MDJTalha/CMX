@@ -172,7 +172,8 @@ def test_failed_or_blocked_job_requires_operator_intervention_before_requeue(tmp
 
 def test_wall_clock_scheduler_preserves_coordinator_live_clock(tmp_path):
     _, _, coordinator, scheduler = setup(tmp_path)
-    actor = principal()
+    now = int(time.time())
+    actor = principal().model_copy(update={"issued_at": now - 10, "expires_at": now + 3600})
     scheduler.enqueue("task_sched_01", principal=actor)
     observed = []
     original = coordinator.run_until_blocked
