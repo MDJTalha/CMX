@@ -349,22 +349,29 @@ def test_invalid_handler_output_is_not_accepted_as_success(tmp_path):
 
 
 def test_handler_exception_details_are_not_persisted(tmp_path):
+    keys = []
+
     def broken(payload, dependencies, context):
+        keys.append(context.idempotency_key)
         raise RuntimeError("private customer secret")
 
     _, workflow_store, _, coordinator = stack(
         tmp_path, handlers={"demo.transform": broken}
     )
     submit(coordinator, make_plan([step()]))
+    identity = principal()
     outcome = coordinator.run_until_blocked(
-        "task_001", principal=principal(), authorization_now_epoch=150
+        "task_001", principal=identity, authorization_now_epoch=150
     )
     assert outcome.status == "failed"
     record = workflow_store.get_workflow(
-        "task_001", principal=principal(), authorization_now_epoch=150
+        "task_001", principal=identity, authorization_now_epoch=150
     ).steps[0]
     assert record.error_code == "handler_error"
     assert "private customer secret" not in str(record.model_dump())
+    assert coordinator.idempotency_store.get(
+        keys[0], principal=identity, authorization_now_epoch=150
+    ).state == "uncertain"
 
 
 def test_interrupted_running_step_is_not_replayed_automatically(tmp_path):
