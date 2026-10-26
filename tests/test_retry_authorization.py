@@ -185,3 +185,25 @@ def test_consumed_authorization_is_never_restored_after_execution_failure(tmp_pa
     with pytest.raises(RetryAuthorizationError, match="already been consumed"):
         consume(store, executor, record, issued, now=202)
 
+def test_ticket_is_rejected_if_operation_becomes_terminal_after_approval(tmp_path):
+    _, ledger, store, approver, executor, record, decision = setup(tmp_path)
+    # Create a fresh dispatching operation because the standard fixture advances to uncertain.
+    key = hashlib.sha256(b"ticket-stale-after-success").hexdigest()
+    dispatching, created = ledger.reserve(
+        "task_001:step_stale", key, {"amount": 99}, principal=approver,
+        occurred_at=160, authorization_now_epoch=160,
+    )
+    assert created
+    ledger.mark_dispatching(key, principal=approver, occurred_at=161, authorization_now_epoch=161)
+    decision = decision.model_copy(update={"evidence_ref": "provider-evidence:stale"})
+    issued = issue(store, approver, ledger.get(key, principal=approver, authorization_now_epoch=162), decision, now=162)
+    ledger.mark_succeeded(
+        key, {"ok": True}, principal=approver, occurred_at=163, authorization_now_epoch=163,
+    )
+    with pytest.raises(RetryAuthorizationError, match="no longer eligible"):
+        consume(
+            store, executor, dispatching.model_copy(update={"state": "uncertain"}),
+            issued, now=164, idempotency_key=key,
+            request_hash=dispatching.request_hash, evidence_ref="provider-evidence:stale",
+        )
+
