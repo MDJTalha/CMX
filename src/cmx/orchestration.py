@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from cmx.idempotency import IdempotencyConflict, SQLiteIdempotencyStore
 from cmx.kernel import (
     CapabilityRegistry,
     CriterionResult,
@@ -166,6 +167,7 @@ class ExecutionCoordinator:
         self.workflow_store = workflow_store
         self.registry = registry
         self.worker_leases = SQLiteWorkerLeaseStore(task_store)
+        self.idempotency_store = SQLiteIdempotencyStore(task_store)
         self.worker_id = f"coordinator-{uuid4().hex}"
         self.handlers: dict[str, CapabilityHandler] = {}
         for capability_id, handler in (handlers or {}).items():
@@ -567,6 +569,54 @@ class ExecutionCoordinator:
                     spec.input_payload,
                 ).encode("utf-8")
             ).hexdigest()
+            operation_request = {
+                "tenant_id": identity.tenant_id,
+                "task_id": task_id,
+                "plan_id": snapshot.plan.plan_id,
+                "plan_hash": snapshot.plan_hash,
+                "step_id": step_id,
+                "capability_id": capability.capability_id,
+                "capability_version": capability.version,
+                "capability_fingerprint": _capability_fingerprint(capability),
+                "input_payload": spec.input_payload,
+                "dependency_outputs": dependencies,
+            }
+            try:
+                idempotency_record, reservation_created = self.idempotency_store.reserve(
+                    f"{task_id}:{step_id}", idempotency_key, operation_request,
+                    principal=identity, occurred_at=self._clock(authorization_now_epoch),
+                    authorization_now_epoch=authorization_now_epoch,
+                )
+                if not reservation_created:
+                    self.workflow_store.interrupt_step(
+                        task_id, step_id, principal=identity,
+                        occurred_at=self._clock(authorization_now_epoch),
+                        authorization_now_epoch=authorization_now_epoch,
+                    )
+                    self._release_lease(lease, identity, authorization_now_epoch)
+                    return self._finish_failure(
+                        task_id, identity, authorization_now_epoch,
+                        (
+                            "A durable idempotency record already exists for this operation "
+                            f"(state: {idempotency_record.state}). Handler replay was blocked."
+                        ),
+                    )
+                self.idempotency_store.mark_dispatching(
+                    idempotency_key, principal=identity,
+                    occurred_at=self._clock(authorization_now_epoch),
+                    authorization_now_epoch=authorization_now_epoch,
+                )
+            except Exception:
+                # No handler is called when reservation/dispatch intent cannot be durably recorded.
+                try:
+                    self.workflow_store.interrupt_step(
+                        task_id, step_id, principal=identity,
+                        occurred_at=self._clock(authorization_now_epoch),
+                        authorization_now_epoch=authorization_now_epoch,
+                    )
+                finally:
+                    self._release_lease(lease, identity, authorization_now_epoch)
+                raise
             context = ExecutionContext(
                 tenant_id=identity.tenant_id,
                 task_id=task_id,
@@ -589,6 +639,15 @@ class ExecutionCoordinator:
             except TimeoutError:
                 heartbeat.stop()
                 heartbeat.raise_if_lost()
+                try:
+                    self.idempotency_store.mark_uncertain(
+                        idempotency_key, principal=identity,
+                        occurred_at=self._clock(authorization_now_epoch),
+                        authorization_now_epoch=authorization_now_epoch,
+                    )
+                except Exception:
+                    # A stuck dispatching record also blocks replay; never mask the safety boundary.
+                    pass
                 self.workflow_store.fail_step(
                     task_id, step_id, error_code="handler_timeout",
                     principal=identity, occurred_at=self._clock(authorization_now_epoch),
@@ -600,6 +659,15 @@ class ExecutionCoordinator:
             except Exception:
                 heartbeat.stop()
                 heartbeat.raise_if_lost()
+                try:
+                    self.idempotency_store.mark_uncertain(
+                        idempotency_key, principal=identity,
+                        occurred_at=self._clock(authorization_now_epoch),
+                        authorization_now_epoch=authorization_now_epoch,
+                    )
+                except Exception:
+                    # A stuck dispatching record also blocks replay; never mask the safety boundary.
+                    pass
                 self.workflow_store.fail_step(
                     task_id, step_id, error_code="handler_error",
                     principal=identity, occurred_at=self._clock(authorization_now_epoch),
@@ -620,6 +688,14 @@ class ExecutionCoordinator:
                     now_epoch=authorization_now_epoch,
                 )
             except (CapabilityPayloadValidationError, ValueError):
+                try:
+                    self.idempotency_store.mark_uncertain(
+                        idempotency_key, principal=identity,
+                        occurred_at=self._clock(authorization_now_epoch),
+                        authorization_now_epoch=authorization_now_epoch,
+                    )
+                except Exception:
+                    pass
                 self.workflow_store.fail_step(
                     task_id, step_id, error_code="output_validation_failed",
                     principal=identity, occurred_at=self._clock(authorization_now_epoch),
@@ -634,6 +710,8 @@ class ExecutionCoordinator:
                 occurred_at=self._clock(authorization_now_epoch),
                 authorization_now_epoch=authorization_now_epoch,
                 worker_id=lease.worker_id, fencing_token=lease.fencing_token,
+                idempotency_store=self.idempotency_store,
+                idempotency_key=idempotency_key,
             )
             self._release_lease(lease, identity, authorization_now_epoch)
             executed_this_run += 1

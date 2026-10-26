@@ -1,3 +1,4 @@
+import hashlib
 import sqlite3
 
 import pytest
@@ -12,7 +13,7 @@ from cmx.kernel import (
     TaskRecord,
     TaskState,
 )
-from cmx.orchestration import ExecutionCoordinator, ExecutionContext
+from cmx.orchestration import ExecutionCoordinator, ExecutionContext, _capability_fingerprint, _stable_key
 from cmx.persistence import SQLiteTaskStore
 from cmx.security import AuthorizationError, PrincipalContext
 from cmx.workflow_store import (
@@ -348,22 +349,29 @@ def test_invalid_handler_output_is_not_accepted_as_success(tmp_path):
 
 
 def test_handler_exception_details_are_not_persisted(tmp_path):
+    keys = []
+
     def broken(payload, dependencies, context):
+        keys.append(context.idempotency_key)
         raise RuntimeError("private customer secret")
 
     _, workflow_store, _, coordinator = stack(
         tmp_path, handlers={"demo.transform": broken}
     )
     submit(coordinator, make_plan([step()]))
+    identity = principal()
     outcome = coordinator.run_until_blocked(
-        "task_001", principal=principal(), authorization_now_epoch=150
+        "task_001", principal=identity, authorization_now_epoch=150
     )
     assert outcome.status == "failed"
     record = workflow_store.get_workflow(
-        "task_001", principal=principal(), authorization_now_epoch=150
+        "task_001", principal=identity, authorization_now_epoch=150
     ).steps[0]
     assert record.error_code == "handler_error"
     assert "private customer secret" not in str(record.model_dump())
+    assert coordinator.idempotency_store.get(
+        keys[0], principal=identity, authorization_now_epoch=150
+    ).state == "uncertain"
 
 
 def test_interrupted_running_step_is_not_replayed_automatically(tmp_path):
@@ -575,3 +583,106 @@ def test_oversized_workflow_plan_is_rejected_before_task_creation(tmp_path):
     assert task_store.get_task(
         "task_001", principal=principal(), authorization_now_epoch=150
     ) is None
+
+
+def test_existing_idempotency_reservation_blocks_handler_dispatch(tmp_path):
+    calls = []
+
+    def transform(payload, dependencies, context: ExecutionContext):
+        calls.append(context.step_id)
+        return {"result": payload["value"] * 2}
+
+    _, workflow_store, registry, coordinator = stack(
+        tmp_path, handlers={"demo.transform": transform}
+    )
+    identity = principal()
+    plan = make_plan([step()])
+    submitted = submit(coordinator, plan, identity)
+    capability_spec = registry.get("demo.transform")
+    key = hashlib.sha256(
+        _stable_key(
+            identity.tenant_id, "task_001", plan.plan_id, "step_one",
+            capability_spec.version, {"value": 3},
+        ).encode("utf-8")
+    ).hexdigest()
+    request = {
+        "tenant_id": identity.tenant_id,
+        "task_id": "task_001",
+        "plan_id": plan.plan_id,
+        "plan_hash": submitted.plan_hash,
+        "step_id": "step_one",
+        "capability_id": capability_spec.capability_id,
+        "capability_version": capability_spec.version,
+        "capability_fingerprint": _capability_fingerprint(capability_spec),
+        "input_payload": {"value": 3},
+        "dependency_outputs": {},
+    }
+    coordinator.idempotency_store.reserve(
+        "task_001:step_one", key, request, principal=identity,
+        occurred_at=150, authorization_now_epoch=150,
+    )
+
+    outcome = coordinator.run_until_blocked(
+        "task_001", principal=identity, authorization_now_epoch=150,
+    )
+    final = workflow_store.get_workflow(
+        "task_001", principal=identity, authorization_now_epoch=151,
+    )
+    assert calls == []
+    assert final.steps[0].status == "interrupted"
+    assert final.task.state == TaskState.FAILED
+    assert outcome.task_state == TaskState.FAILED
+    assert outcome.workflow_state == "failed"
+    assert "replay was blocked" in outcome.message.lower()
+
+
+def test_workflow_success_and_idempotency_success_commit_atomically(tmp_path, monkeypatch):
+    holder = {}
+    calls = []
+
+    def transform(payload, dependencies, context):
+        calls.append(context.step_id)
+        coordinator = holder["coordinator"]
+
+        def fail_success_event(connection, **kwargs):
+            if kwargs.get("event_type") == "operation.succeeded":
+                raise RuntimeError("simulated idempotency success audit failure")
+            return holder["original_append"](connection, **kwargs)
+
+        holder["original_append"] = coordinator.idempotency_store._append_event
+        monkeypatch.setattr(coordinator.idempotency_store, "_append_event", fail_success_event)
+        return {"result": payload["value"] * 2}
+
+    task_store, workflow_store, _, coordinator = stack(
+        tmp_path, handlers={"demo.transform": transform}
+    )
+    holder["coordinator"] = coordinator
+    identity = principal()
+    submit(coordinator, make_plan([step()]), identity)
+    with pytest.raises(RuntimeError, match="simulated idempotency success audit failure"):
+        coordinator.run_until_blocked(
+            "task_001", principal=identity, authorization_now_epoch=150,
+        )
+
+    snapshot = workflow_store.get_workflow(
+        "task_001", principal=identity, authorization_now_epoch=151,
+    )
+    assert calls == ["step_one"]
+    assert snapshot.steps[0].status == "running"
+    events = workflow_store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=151,
+    )
+    assert not any(event.event_type == "step.succeeded" for event in events)
+    # Dispatch intent is durable, but both success records rolled back together.
+    from cmx.orchestration import _stable_key
+    import hashlib
+    capability_spec = coordinator.registry.get("demo.transform")
+    key = hashlib.sha256(
+        _stable_key(
+            identity.tenant_id, "task_001", "plan_001", "step_one",
+            capability_spec.version, {"value": 3},
+        ).encode("utf-8")
+    ).hexdigest()
+    assert coordinator.idempotency_store.get(
+        key, principal=identity, authorization_now_epoch=151,
+    ).state == "dispatching"
