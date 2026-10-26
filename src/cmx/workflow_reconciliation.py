@@ -216,8 +216,6 @@ class SQLiteWorkflowReconciler:
                 raise WorkflowNotFoundError("Workflow step was not found in the active tenant.")
             if row["status"] != "interrupted":
                 raise WorkflowConflictError("Only an interrupted step can be checked for retry candidacy.")
-            if row["attempts"] >= row["max_attempts"]:
-                raise WorkflowConflictError("Step retry limit has been reached.")
             lease = connection.execute(
                 """SELECT expires_at FROM cmx_worker_leases
                    WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
@@ -236,6 +234,8 @@ class SQLiteWorkflowReconciler:
                 raise WorkflowConflictError(
                     "The latest reconciliation review must confirm the effect was not applied before retry candidacy."
                 )
+            if row["attempts"] >= row["max_attempts"]:
+                raise WorkflowConflictError("Step retry limit has been reached.")
             plan = ExecutionPlan.model_validate_json(plan_row["plan_json"])
             spec = next((item for item in plan.steps if item.step_id == step_id), None)
             if spec is None:
