@@ -23,6 +23,12 @@ Start with a specific SME back-office workflow decision. The first target niche 
 
 The engine only evaluates supplied candidate records. It does **not** browse the web, independently verify sources, retrieve live prices, call an LLM, train ML models, execute business actions, persist assessments or run advertisements.
 
+## Reasoning kernel status — under active development
+
+The dependent draft pull-request series adds contracts for task lifecycle state, bounded retries, execution-plan dependency validation, a capability allowlist, human-approval requirements, completion verification, and JSON Schema validation for capability inputs and outputs.
+
+These are engineering contracts, not a functioning autonomous runtime. The kernel currently does not execute tools or external actions, authenticate a caller, persist task state, retrieve live vendor data or connect an LLM. Caller-supplied permission sets are not a production authorization system. The changes remain in draft pull requests and require review before merging.
+
 ## Quick start — Windows PowerShell
 
 Requirements: Python 3.11 or later and internet access for the initial dependency installation.
