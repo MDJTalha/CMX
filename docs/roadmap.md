@@ -28,7 +28,8 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Independent verification contracts and testable completion criteria
 - [x] Deterministic core remains usable without an LLM
 - [x] Add fail-closed tenant-scoped authorization policy against an internally supplied principal context
-- [ ] Connect a real authentication/session verifier and persist identity-bound audit records
+- [x] Verify server-issued service bearer credentials against hashed server-side records, including expiry and one-way revocation for assessment evaluation
+- [ ] Integrate human identity through OIDC or equivalent and implement browser sessions/MFA where needed
 - [x] Validate capability schemas and plan inputs against bounded JSON Schema Draft 2020-12 contracts
 - [x] Add a controlled coordinator for explicitly injected capability handlers and topologically ordered plans
 - [x] Persist immutable workflow plans, step states/results, approvals and hash-chained workflow audit events
@@ -47,11 +48,12 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Phase 4 — Secure organizational product
 
-- [ ] Authentication, authorization and tenant isolation
-- [ ] Secrets management, rate limits, quotas and abuse protections
-- [ ] Privacy/data retention controls and deletion workflows
-- [ ] Human approval gates for consequential operations
-- [ ] Observability, incident response and production security review
+- [x] Enforce a server-derived permission on the assessment evaluation HTTP endpoint
+- [ ] Add resource-level tenant enforcement as data-backed endpoints are introduced
+- [ ] Add OAuth/OIDC, human sessions, MFA and managed organization membership where required
+- [ ] Add secrets management, rate limits, quotas and abuse protections
+- [ ] Add privacy/data retention controls and deletion workflows
+- [ ] Complete security review, backups, monitoring, incident response and production readiness checks
 
 ## Phase 5 — Commercial services
 
@@ -69,4 +71,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The current development branch contains task-state and capability-registry contracts, bounded JSON Schema validation, fail-closed tenant-scoped authorization policy, verification contracts, and a file-backed SQLite task/audit reference store. The store atomically persists transitions and hash-chained audit events, scopes reads by tenant, and tests version conflicts and audit integrity. It does not verify real credentials or execute tools, and SQLite is not yet a production multi-node backend. See docs/reasoning-kernel.md, docs/authorization-model.md and docs/task-persistence.md.
+The latest authentication increment adds a persistent service credential registry, single-display random bearer key issuance, digest-only secret storage, expiry checks, one-way revocation, a hash-chained issue/revoke event ledger, an operator CLI and HTTP permission enforcement on the assessment evaluator. This is a service-to-service trust boundary, not a human identity system. See docs/authorization-model.md for usage and limitations. All draft PRs remain unmerged.
