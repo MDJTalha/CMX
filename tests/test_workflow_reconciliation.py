@@ -4,7 +4,7 @@ from cmx.workflow_reconciliation import SQLiteWorkflowReconciler
 from cmx.workflow_store import WorkflowConflictError
 from cmx.security import AuthorizationError
 from cmx.worker_leases import SQLiteWorkerLeaseStore
-from test_worker_leases import principal, ready_workflow
+from cmx.kernel import CapabilityRegistry, CapabilitySpec\nfrom test_worker_leases import principal, ready_workflow
 
 
 def reviewer():
@@ -151,3 +151,91 @@ def test_inventory_marks_interrupted_step_non_actionable_with_live_lease(tmp_pat
     )
     assert result[0]["lease_state"] == "active"
     assert result[0]["actionable"] is False
+
+
+
+def test_success_resolution_preflight_validates_output_without_mutation(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="ledger:TX-88", notes="External ledger confirms the operation.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    before = store.get_workflow("task_001", principal=identity, authorization_now_epoch=211)
+    candidate = reconciler.validate_success_resolution(
+        "task_001", "step_one", output_payload={"result": 5},
+        registry=registry, principal=identity, authorization_now_epoch=211,
+    )
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=211)
+    assert candidate["validated"] is True
+    assert candidate["committed"] is False
+    assert candidate["output_payload"] == {"result": 5}
+    assert before.steps[0].status == after.steps[0].status == "interrupted"
+    assert before.steps[0].output_payload == after.steps[0].output_payload is None
+
+
+def test_success_resolution_preflight_rejects_invalid_output(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="ledger:TX-89", notes="External effect verified.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    from cmx.schema_validation import CapabilityPayloadValidationError
+    with pytest.raises(CapabilityPayloadValidationError):
+        reconciler.validate_success_resolution(
+            "task_001", "step_one", output_payload={"unexpected": "shape"},
+            registry=registry, principal=identity, authorization_now_epoch=211,
+        )
+
+
+def test_success_resolution_preflight_requires_latest_review_to_confirm_effect(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="ledger:TX-90", notes="Initially confirmed.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    reconciler.record_review(
+        "task_001", "step_one", decision="inconclusive",
+        evidence_reference="incident:INC-90", notes="Subsequent review reopened uncertainty.",
+        principal=identity, occurred_at=211, authorization_now_epoch=211,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    with pytest.raises(WorkflowConflictError, match="latest reconciliation review"):
+        reconciler.validate_success_resolution(
+            "task_001", "step_one", output_payload={"result": 5},
+            registry=registry, principal=identity, authorization_now_epoch=212,
+        )
