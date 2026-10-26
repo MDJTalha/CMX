@@ -27,7 +27,8 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Plan representation with dependency validation and retry limits
 - [x] Independent verification contracts and testable completion criteria
 - [x] Deterministic core remains usable without an LLM
-- [ ] Bind permissions to authenticated identities and durable audit records
+- [x] Add fail-closed tenant-scoped authorization policy against an internally supplied principal context
+- [ ] Connect a real authentication/session verifier and persist identity-bound audit records
 - [x] Validate capability schemas and plan inputs against bounded JSON Schema Draft 2020-12 contracts
 - [ ] Add a constrained executor interface
 - [ ] Add persistent task storage and concurrency tests
