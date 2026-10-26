@@ -229,7 +229,7 @@ class SQLiteWorkflowScheduler:
                 return self._finish(job, identity, worker_id, "blocked", "approval_required", now, outcome)
             return self._requeue(job, identity, worker_id, now, outcome)
         except Exception:
-            return self._retry_or_fail(job, identity, worker_id, now)
+            return self._retry_or_fail(job, identity, worker_id, now, max_attempts)
 
     def _finish(
         self, job: ScheduledJob, principal: PrincipalContext, worker_id: str,
@@ -247,7 +247,8 @@ class SQLiteWorkflowScheduler:
         return SchedulerRunResult(status="requeued", job=updated, outcome=outcome)
 
     def _retry_or_fail(
-        self, job: ScheduledJob, principal: PrincipalContext, worker_id: str, now: int,
+        self, job: ScheduledJob, principal: PrincipalContext, worker_id: str,
+        now: int, max_attempts: int,
     ) -> SchedulerRunResult:
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -259,7 +260,7 @@ class SQLiteWorkflowScheduler:
                 ).fetchone()
                 if row is None or row["status"] != "running" or row["lease_owner"] != worker_id or row["fencing_token"] != job.fencing_token:
                     raise SchedulerConflict("Scheduler lease was lost; stale worker cannot update the job.")
-                terminal = row["attempts"] >= 5
+                terminal = row["attempts"] >= max_attempts
                 status = "failed" if terminal else "queued"
                 delay = min(60, 2 ** min(row["attempts"], 6))
                 connection.execute(
@@ -290,9 +291,9 @@ class SQLiteWorkflowScheduler:
                     """UPDATE cmx_scheduler_jobs SET status=?, available_at=?, lease_owner=NULL,
                        lease_until=NULL, last_error_code=?, updated_at=?
                        WHERE tenant_id=? AND job_id=? AND status='running'
-                         AND lease_owner=? AND fencing_token=? AND lease_until>?""",
+                         AND lease_owner=? AND fencing_token=?""",
                     (status, available_at, error_code, now, principal.tenant_id,
-                     job.job_id, worker_id, job.fencing_token, now),
+                     job.job_id, worker_id, job.fencing_token),
                 )
                 if updated.rowcount != 1:
                     raise SchedulerConflict("Scheduler lease expired or was fenced; stale worker cannot commit.")
