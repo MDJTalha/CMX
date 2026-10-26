@@ -240,3 +240,120 @@ def test_success_resolution_preflight_requires_latest_review_to_confirm_effect(t
             "task_001", "step_one", output_payload={"result": 5},
             registry=registry, principal=identity, authorization_now_epoch=212,
         )
+
+
+
+def test_retry_candidate_rejects_exhausted_attempt_budget(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_not_applied",
+        evidence_reference="provider:lookup-101", notes="Provider confirms no operation was applied.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    with pytest.raises(WorkflowConflictError, match="retry limit"):
+        reconciler.validate_retry_candidate(
+            "task_001", "step_one", registry=registry,
+            principal=identity, authorization_now_epoch=211,
+        )
+
+
+def test_retry_candidate_does_not_treat_confirmed_effect_as_retryable(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="provider:lookup-102", notes="Provider confirms operation completed.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    with pytest.raises(WorkflowConflictError, match="effect was not applied"):
+        reconciler.validate_retry_candidate(
+            "task_001", "step_one", registry=registry,
+            principal=identity, authorization_now_epoch=211,
+        )
+
+
+
+def test_retry_candidate_is_read_only_when_all_preconditions_hold(tmp_path):
+    from cmx.orchestration import ExecutionCoordinator
+    from cmx.kernel import ExecutionPlan, PlanStep
+    from cmx.persistence import SQLiteTaskStore
+    from cmx.workflow_store import SQLiteWorkflowStore
+
+    task_store = SQLiteTaskStore(tmp_path / "retryable.sqlite3")
+    store = SQLiteWorkflowStore(task_store)
+    identity = reviewer()
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=1,
+    ))
+    coordinator = ExecutionCoordinator(
+        task_store=task_store, workflow_store=store, registry=registry, handlers={},
+    )
+    plan = ExecutionPlan(
+        plan_id="plan_retry", objective="Test retry-candidate preflight.",
+        steps=[PlanStep(
+            step_id="step_retry", capability_id="demo.transform",
+            objective="Exercise a retryable interrupted operation.",
+            input_payload={"value": 3}, max_attempts=2,
+        )],
+    )
+    coordinator.submit(
+        "task_retry", plan, principal=identity, occurred_at=150, authorization_now_epoch=150,
+    )
+    lease = SQLiteWorkerLeaseStore(task_store).claim(
+        "task_retry", "step_retry", worker_id="worker_retry", lease_seconds=5,
+        principal=identity, now_epoch=200, authorization_now_epoch=200,
+    )
+    store.start_step(
+        "task_retry", "step_retry", principal=identity, occurred_at=201,
+        authorization_now_epoch=201, worker_id=lease.worker_id, fencing_token=lease.fencing_token,
+    )
+    store.interrupt_step(
+        "task_retry", "step_retry", principal=identity, occurred_at=206,
+        authorization_now_epoch=206,
+    )
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_retry", "step_retry", decision="effect_not_applied",
+        evidence_reference="provider:lookup-103",
+        notes="Independent provider query confirms no side effect was applied.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    before = store.get_workflow("task_retry", principal=identity, authorization_now_epoch=211)
+    result = reconciler.validate_retry_candidate(
+        "task_retry", "step_retry", registry=registry,
+        principal=identity, authorization_now_epoch=211,
+    )
+    after = store.get_workflow("task_retry", principal=identity, authorization_now_epoch=211)
+    assert result["candidate"] is True
+    assert result["retry_authorized"] is False
+    assert result["automatic_replay"] is False
+    assert before.steps[0].status == after.steps[0].status == "interrupted"
+    assert before.steps[0].attempts == after.steps[0].attempts == 1
