@@ -240,3 +240,54 @@ def test_success_resolution_preflight_requires_latest_review_to_confirm_effect(t
             "task_001", "step_one", output_payload={"result": 5},
             registry=registry, principal=identity, authorization_now_epoch=212,
         )
+
+
+
+def test_retry_candidate_rejects_exhausted_attempt_budget(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_not_applied",
+        evidence_reference="provider:lookup-101", notes="Provider confirms no operation was applied.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    with pytest.raises(WorkflowConflictError, match="retry limit"):
+        reconciler.validate_retry_candidate(
+            "task_001", "step_one", registry=registry,
+            principal=identity, authorization_now_epoch=211,
+        )
+
+
+def test_retry_candidate_does_not_treat_confirmed_effect_as_retryable(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="provider:lookup-102", notes="Provider confirms operation completed.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    with pytest.raises(WorkflowConflictError, match="retry limit"):
+        reconciler.validate_retry_candidate(
+            "task_001", "step_one", registry=registry,
+            principal=identity, authorization_now_epoch=211,
+        )
