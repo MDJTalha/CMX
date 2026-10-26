@@ -275,6 +275,43 @@ class SQLiteIdempotencyStore:
     def mark_dispatching(self, key: str, *, principal: PrincipalContext, occurred_at: int | None = None, authorization_now_epoch: int | None = None) -> IdempotencyRecord:
         return self._transition(key, "dispatching", "operation.dispatching", principal=principal, occurred_at=occurred_at, authorization_now_epoch=authorization_now_epoch)
 
+    def _mark_succeeded_in_transaction(
+        self, connection: sqlite3.Connection, key: str, result: Any, *,
+        principal: PrincipalContext, occurred_at: int,
+    ) -> IdempotencyRecord:
+        """Commit idempotency success on a caller-owned transaction."""
+        row = connection.execute(
+            "SELECT * FROM cmx_idempotency_operations WHERE tenant_id = ? AND idempotency_key = ?",
+            (principal.tenant_id, key),
+        ).fetchone()
+        if row is None:
+            raise LookupError("Idempotency operation was not found in the active tenant.")
+        if row["state"] != "dispatching":
+            raise IdempotencyConflict(
+                f"Cannot atomically complete idempotency operation from {row['state']}."
+            )
+        result_json = _canonical_json(result)
+        connection.execute(
+            """UPDATE cmx_idempotency_operations SET state = 'succeeded', result_json = ?, updated_at = ?
+               WHERE tenant_id = ? AND idempotency_key = ? AND state = 'dispatching'""",
+            (result_json, occurred_at, principal.tenant_id, key),
+        )
+        self._append_event(
+            connection, tenant_id=principal.tenant_id, key=key,
+            actor_id=principal.subject_id, event_type="operation.succeeded",
+            occurred_at=occurred_at,
+            payload={
+                "operation_id": row["operation_id"], "from_state": "dispatching",
+                "to_state": "succeeded", "result_hash": _sha256(result_json),
+                "atomic_with_workflow_completion": True,
+            },
+        )
+        updated = connection.execute(
+            "SELECT * FROM cmx_idempotency_operations WHERE tenant_id = ? AND idempotency_key = ?",
+            (principal.tenant_id, key),
+        ).fetchone()
+        return self._record(updated)
+
     def mark_succeeded(self, key: str, result: Any, *, principal: PrincipalContext, occurred_at: int | None = None, authorization_now_epoch: int | None = None) -> IdempotencyRecord:
         return self._transition(key, "succeeded", "operation.succeeded", principal=principal, occurred_at=occurred_at, authorization_now_epoch=authorization_now_epoch, result=result)
 
