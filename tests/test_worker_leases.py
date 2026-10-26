@@ -12,7 +12,8 @@ def principal(*, tenant_id="tenant_alpha"):
     return PrincipalContext(
         subject_id="user_001", tenant_id=tenant_id, issuer="https://identity.cmx.test",
         permissions=frozenset({"workflow:submit", "workflow:execute", "workflow:read",
-                               "workflow:approve", "tasks:create", "tasks:read", "tasks:write"}),
+                               "workflow:approve", "tasks:create", "tasks:read", "tasks:write",
+                               "demo:execute"}),
         issued_at=100, expires_at=1000, authentication_verified=True,
         authentication_method="test", credential_id="cred_user_001",
     )
