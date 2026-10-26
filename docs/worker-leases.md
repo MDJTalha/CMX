@@ -15,3 +15,12 @@
 ## Important limits
 
 This is still a single-node SQLite coordination design, not a distributed queue. SQLite's local write serialization is not a distributed lease service for independent nodes or unreliable network filesystems. Background scheduling, process-level cancellation, OS sandboxing, resource quotas, and safe reconciliation of external side effects remain open work. Do not blindly replay uncertain operations; use stable idempotency keys and reconcile external state first.
+
+
+## Durable idempotency ledger
+
+CMX also maintains a tenant-scoped SQLite idempotency ledger for handler dispatch. Before a registered handler is invoked, the coordinator records a stable operation key, canonical request hash, pinned capability contract, plan hash, input and dependency outputs. The operation transitions from `reserved` to `dispatching`; successful output is recorded as `succeeded`. Handler exceptions, timeouts and output-validation failures are marked `uncertain` when possible. A still-`dispatching` record is also treated as uncertain and blocks reuse.
+
+The ledger rejects reuse of a key with a different scope or request payload, and its append-only transition events are hash chained and verifiable. Records and event reads are tenant scoped and mutations require `workflow:execute`.
+
+**No exactly-once guarantee:** a database transaction cannot atomically commit with an arbitrary external provider. If CMX crashes after the provider accepts a request but before CMX records success, the ledger cannot determine the provider outcome on its own. Such a record blocks replay and requires provider-side lookup/reconciliation. This ledger does not itself retry operations or provide a provider-specific idempotency adapter.
