@@ -10,5 +10,5 @@ A worker calls `run_once(...)` with an already configured `ExecutionCoordinator`
 - It does not create identities. The supplied principal must be produced by the trusted authentication layer, never by request JSON.
 - The scheduler's fencing token protects queue state, while the coordinator's step-level fencing protects workflow transitions. External providers must still enforce their own idempotency keys.
 - A process can crash after an external side effect but before the scheduler records completion. Such operations must be reconciled; the queue must not be treated as exactly-once delivery.
-- Long-running production workers need a lease-renewal supervisor and a service-managed shutdown protocol. The initial implementation relies on a bounded lease and fencing; it is a reference implementation pending crash-injection and production load testing.
+- When using wall-clock mode (omit `now_epoch`), the worker renews its scheduler lease in a background heartbeat and refuses to commit a result after renewal failure. Explicit `now_epoch` is deterministic test mode and intentionally disables the wall-clock heartbeat. A service-managed shutdown protocol, crash-injection tests and production load testing remain required.
 - Failed or approval-blocked jobs are not silently requeued by `enqueue`; an operator must review the workflow and take an explicit action.
