@@ -10,6 +10,7 @@ import json
 import re
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -218,7 +219,7 @@ class ApprovedEvidenceStore:
     def __init__(self, database_path: str | Path) -> None:
         self.database_path = str(database_path)
         Path(self.database_path).parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
+        with self._connection() as connection
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("""CREATE TABLE IF NOT EXISTS approved_evidence (
                 document_id TEXT NOT NULL,
@@ -242,6 +243,14 @@ class ApprovedEvidenceStore:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout=10000")
         return db
+
+    @contextmanager
+    def _connection(self):
+        db = self._connect()
+        try:
+            yield db
+        finally:
+            db.close()
 
     def approve(self, document: ApprovedDocument, *, now_epoch: int | None = None) -> str:
         now = int(time.time()) if now_epoch is None else now_epoch
