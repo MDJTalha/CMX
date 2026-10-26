@@ -14,13 +14,13 @@ def reviewer():
     })
 
 
-def interrupted_store(tmp_path, *, lease_seconds=5):
+def interrupted_store(tmp_path):
     task_store, store = ready_workflow(tmp_path)
     identity = reviewer()
     leases = SQLiteWorkerLeaseStore(task_store)
     lease = leases.claim(
         "task_001", "step_one", worker_id="worker_recovered",
-        lease_seconds=lease_seconds, principal=identity, now_epoch=200, authorization_now_epoch=200,
+        lease_seconds=5, principal=identity, now_epoch=200, authorization_now_epoch=200,
     )
     store.start_step(
         "task_001", "step_one", principal=identity, occurred_at=201,
@@ -93,7 +93,14 @@ def test_reconciliation_rejects_non_interrupted_step(tmp_path):
 
 
 def test_future_audit_timestamp_cannot_bypass_live_lease(tmp_path):
-    store, identity = interrupted_store(tmp_path, lease_seconds=100)
+    store, identity = interrupted_store(tmp_path)
+    # Simulate a lease whose expiry is still in the future after an interrupted step
+    # was persisted; this tests the lease guard independently of interrupt-step policy.
+    with store.task_store._connection() as connection:
+        connection.execute(
+            "UPDATE cmx_worker_leases SET expires_at = 300 WHERE tenant_id = ? AND task_id = ? AND step_id = ?",
+            (identity.tenant_id, "task_001", "step_one"),
+        )
     with pytest.raises(WorkflowConflictError, match="live worker lease"):
         SQLiteWorkflowReconciler(store).record_review(
             "task_001", "step_one", decision="inconclusive",
