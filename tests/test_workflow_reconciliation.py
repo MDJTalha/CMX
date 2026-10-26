@@ -4,7 +4,8 @@ from cmx.workflow_reconciliation import SQLiteWorkflowReconciler
 from cmx.workflow_store import WorkflowConflictError
 from cmx.security import AuthorizationError
 from cmx.worker_leases import SQLiteWorkerLeaseStore
-from cmx.kernel import CapabilityRegistry, CapabilitySpec\nfrom test_worker_leases import principal, ready_workflow
+from cmx.kernel import CapabilityRegistry, CapabilitySpec
+from test_worker_leases import principal, ready_workflow
 
 
 def reviewer():
