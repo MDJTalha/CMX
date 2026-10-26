@@ -414,3 +414,69 @@ def test_atomic_non_application_resolution_requires_latest_review(tmp_path):
         )
     after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
     assert before.steps[0].status == after.steps[0].status == "interrupted"
+
+
+def test_atomic_non_application_resolution_rolls_back_step_when_audit_append_fails(tmp_path, monkeypatch):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_not_applied",
+        evidence_reference="provider:lookup-rollback-1",
+        notes="Independent evidence confirms no side effect was applied.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    before = store.get_workflow("task_001", principal=identity, authorization_now_epoch=211)
+    before_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=211,
+    )
+
+    def fail_audit_append(*args, **kwargs):
+        raise RuntimeError("simulated audit append failure")
+
+    monkeypatch.setattr(store, "_record_step_event", fail_audit_append)
+    with pytest.raises(RuntimeError, match="simulated audit append failure"):
+        reconciler.resolve_confirmed_non_application(
+            "task_001", "step_one", principal=identity,
+            occurred_at=212, authorization_now_epoch=212,
+        )
+
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    after_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    assert after.steps[0].status == before.steps[0].status == "interrupted"
+    assert after.workflow_state == before.workflow_state == "failed"
+    assert len(after_events) == len(before_events)
+    assert after_events[-1].event_type == "step.reconciliation_recorded"
+
+
+def test_atomic_non_application_resolution_blocks_live_lease_without_mutation(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_not_applied",
+        evidence_reference="provider:lookup-live-lease",
+        notes="Independent evidence confirms no side effect was applied.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    with store.task_store._connection() as connection:
+        connection.execute(
+            "UPDATE cmx_worker_leases SET expires_at = 300 "
+            "WHERE tenant_id = ? AND task_id = ? AND step_id = ?",
+            (identity.tenant_id, "task_001", "step_one"),
+        )
+    before = store.get_workflow("task_001", principal=identity, authorization_now_epoch=211)
+    before_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=211,
+    )
+    with pytest.raises(WorkflowConflictError, match="live worker lease"):
+        reconciler.resolve_confirmed_non_application(
+            "task_001", "step_one", principal=identity,
+            occurred_at=400, authorization_now_epoch=212,
+        )
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    after_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    assert before.steps[0].status == after.steps[0].status == "interrupted"
+    assert len(after_events) == len(before_events)
