@@ -6,7 +6,7 @@ The kernel defines contracts only. It does not execute arbitrary tools or extern
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -263,3 +263,107 @@ class CapabilityRegistry:
     def list_capabilities(self) -> list[CapabilitySpec]:
         """Return declarative metadata; no callable or external action is exposed."""
         return [self._capabilities[key] for key in sorted(self._capabilities)]
+
+
+class VerificationCriterion(BaseModel):
+    """A measurable completion condition that must be checked independently."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    criterion_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,39}$")
+    description: str = Field(min_length=8, max_length=500)
+    mandatory: bool = True
+
+
+class VerificationContract(BaseModel):
+    """Explicit, testable acceptance criteria for a task or plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,79}$")
+    objective: str = Field(min_length=5, max_length=1000)
+    criteria: list[VerificationCriterion] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def require_unique_ids_and_mandatory_criterion(self) -> "VerificationContract":
+        ids = [criterion.criterion_id for criterion in self.criteria]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Verification criterion IDs must be unique.")
+        if not any(criterion.mandatory for criterion in self.criteria):
+            raise ValueError("At least one verification criterion must be mandatory.")
+        return self
+
+
+class CriterionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    criterion_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,39}$")
+    outcome: Literal["passed", "failed", "unknown"]
+    evidence_note: str | None = Field(default=None, max_length=1200)
+
+
+class VerificationDecision(BaseModel):
+    """Fail-closed verification summary derived from a contract and observed results."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_id: str
+    status: Literal["passed", "failed", "blocked"]
+    passed_criteria: list[str] = Field(default_factory=list)
+    failed_criteria: list[str] = Field(default_factory=list)
+    unresolved_criteria: list[str] = Field(default_factory=list)
+    rationale: str
+
+
+def evaluate_verification(
+    contract: VerificationContract,
+    results: list[CriterionResult],
+) -> VerificationDecision:
+    """Evaluate completion evidence; missing or unknown mandatory checks block success."""
+    result_by_id = {result.criterion_id: result for result in results}
+    if len(result_by_id) != len(results):
+        raise ValueError("Criterion result IDs must be unique.")
+
+    allowed_ids = {criterion.criterion_id for criterion in contract.criteria}
+    unexpected = set(result_by_id) - allowed_ids
+    if unexpected:
+        raise ValueError("Results contain unknown criteria: " + ", ".join(sorted(unexpected)) + ".")
+
+    passed: list[str] = []
+    failed: list[str] = []
+    unresolved: list[str] = []
+    mandatory_failed: list[str] = []
+    mandatory_unresolved: list[str] = []
+
+    for criterion in contract.criteria:
+        result = result_by_id.get(criterion.criterion_id)
+        outcome = result.outcome if result is not None else "unknown"
+        if outcome == "passed":
+            passed.append(criterion.criterion_id)
+        elif outcome == "failed":
+            failed.append(criterion.criterion_id)
+            if criterion.mandatory:
+                mandatory_failed.append(criterion.criterion_id)
+        else:
+            unresolved.append(criterion.criterion_id)
+            if criterion.mandatory:
+                mandatory_unresolved.append(criterion.criterion_id)
+
+    if mandatory_failed:
+        status: Literal["passed", "failed", "blocked"] = "failed"
+        rationale = "One or more mandatory completion criteria failed; the task must not be marked successful."
+    elif mandatory_unresolved:
+        status = "blocked"
+        rationale = "At least one mandatory completion criterion is missing or unknown; success is not established."
+    else:
+        status = "passed"
+        rationale = "All mandatory completion criteria passed. Optional failures do not override the mandatory acceptance contract."
+
+    return VerificationDecision(
+        contract_id=contract.contract_id,
+        status=status,
+        passed_criteria=passed,
+        failed_criteria=failed,
+        unresolved_criteria=unresolved,
+        rationale=rationale,
+    )
