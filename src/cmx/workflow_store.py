@@ -114,9 +114,7 @@ def _approval_fingerprint(
     return hashlib.sha256(_canonical_json(body).encode("utf-8")).hexdigest()
 
 
-def _payload_hash(value: Any) -> str | None:
-    if value is None:
-        return None
+def _payload_hash(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
@@ -536,6 +534,23 @@ class SQLiteWorkflowStore:
             (tenant_id, task_id),
         ).fetchone()
 
+    @classmethod
+    def _assert_workflow_integrity(
+        cls,
+        connection: sqlite3.Connection,
+        tenant_id: str,
+        task_id: str,
+    ) -> tuple[sqlite3.Row, list[sqlite3.Row], list[sqlite3.Row], ExecutionPlan]:
+        plan_row = cls._plan_row(connection, tenant_id, task_id)
+        if plan_row is None:
+            raise WorkflowNotFoundError("Workflow was not found in the active tenant.")
+        step_rows = cls._step_rows(connection, tenant_id, task_id)
+        event_rows = cls._event_rows(connection, tenant_id, task_id)
+        checked = cls._verify_workflow_rows(plan_row, step_rows, event_rows)
+        if checked is None:
+            raise WorkflowIntegrityError("Workflow definition, step state or audit history failed integrity checks.")
+        return plan_row, step_rows, event_rows, checked[0]
+
     @staticmethod
     def _row_to_step(row: sqlite3.Row) -> WorkflowStepRecord:
         try:
@@ -873,6 +888,7 @@ class SQLiteWorkflowStore:
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._assert_workflow_integrity(connection, identity.tenant_id, task_id)
                 row = self._plan_row(connection, identity.tenant_id, task_id)
                 if row is None:
                     raise WorkflowNotFoundError("Workflow was not found in the active tenant.")
@@ -907,6 +923,7 @@ class SQLiteWorkflowStore:
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._assert_workflow_integrity(connection, identity.tenant_id, task_id)
                 plan_row = self._plan_row(connection, identity.tenant_id, task_id)
                 row = connection.execute(
                     """
@@ -1229,6 +1246,7 @@ class SQLiteWorkflowStore:
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._assert_workflow_integrity(connection, identity.tenant_id, task_id)
                 rows = connection.execute(
                     """
                     SELECT step_id FROM cmx_workflow_steps
