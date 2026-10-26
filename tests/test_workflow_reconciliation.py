@@ -311,7 +311,7 @@ def test_retry_candidate_is_read_only_when_all_preconditions_hold(tmp_path):
                       "required": ["value"], "additionalProperties": False},
         output_schema={"type": "object", "properties": {"result": {"type": "number"}},
                        "required": ["result"], "additionalProperties": False},
-        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=1,
     ))
     coordinator = ExecutionCoordinator(
         task_store=task_store, workflow_store=store, registry=registry, handlers={},
