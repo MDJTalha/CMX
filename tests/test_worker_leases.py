@@ -1,13 +1,46 @@
 import pytest
 
-from cmx.security import AuthorizationError
-from cmx.worker_leases import SQLiteWorkerLeaseStore, WorkerLeaseConflict
-from test_orchestration import make_plan, principal, stack, step, submit
+from cmx.kernel import CapabilityRegistry, CapabilitySpec, ExecutionPlan, PlanStep
+from cmx.orchestration import ExecutionCoordinator
+from cmx.persistence import SQLiteTaskStore
+from cmx.security import AuthorizationError, PrincipalContext
+from cmx.worker_leases import SQLiteWorkerLeaseStore, WorkerLeaseConflict, WorkerLeaseNotFound
+from cmx.workflow_store import SQLiteWorkflowStore
+
+
+def principal(*, tenant_id="tenant_alpha"):
+    return PrincipalContext(
+        subject_id="user_001", tenant_id=tenant_id, issuer="https://identity.cmx.test",
+        permissions=frozenset({"workflow:submit", "workflow:execute", "workflow:read",
+                               "workflow:approve", "tasks:create", "tasks:read", "tasks:write"}),
+        issued_at=100, expires_at=1000, authentication_verified=True,
+        authentication_method="test", credential_id="cred_user_001",
+    )
 
 
 def ready_workflow(tmp_path):
-    task_store, workflow_store, _, coordinator = stack(tmp_path)
-    submit(coordinator, make_plan([step("step_one")]))
+    task_store = SQLiteTaskStore(tmp_path / "cmx.sqlite3")
+    workflow_store = SQLiteWorkflowStore(task_store)
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    coordinator = ExecutionCoordinator(
+        task_store=task_store, workflow_store=workflow_store, registry=registry, handlers={}
+    )
+    plan = ExecutionPlan(
+        plan_id="plan_001", objective="Test durable worker reservation.",
+        steps=[PlanStep(step_id="step_one", capability_id="demo.transform",
+                        objective="Reserve one pending step.", input_payload={"value": 3})],
+    )
+    coordinator.submit("task_001", plan, principal=principal(), occurred_at=150,
+                       authorization_now_epoch=150)
     return task_store, workflow_store
 
 
@@ -64,7 +97,7 @@ def test_lease_renewal_and_release_require_current_fencing_token(tmp_path):
 def test_claim_is_tenant_scoped_and_rejects_non_pending_step(tmp_path):
     task_store, workflow_store = ready_workflow(tmp_path)
     leases = SQLiteWorkerLeaseStore(task_store)
-    with pytest.raises(AuthorizationError):
+    with pytest.raises(WorkerLeaseNotFound):
         leases.claim(
             "task_001", "step_one", worker_id="worker_a", lease_seconds=5,
             principal=principal(tenant_id="tenant_other"), now_epoch=200, authorization_now_epoch=200,
