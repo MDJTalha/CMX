@@ -710,11 +710,8 @@ class ExecutionCoordinator:
                 occurred_at=self._clock(authorization_now_epoch),
                 authorization_now_epoch=authorization_now_epoch,
                 worker_id=lease.worker_id, fencing_token=lease.fencing_token,
-            )
-            self.idempotency_store.mark_succeeded(
-                idempotency_key, output, principal=identity,
-                occurred_at=self._clock(authorization_now_epoch),
-                authorization_now_epoch=authorization_now_epoch,
+                idempotency_store=self.idempotency_store,
+                idempotency_key=idempotency_key,
             )
             self._release_lease(lease, identity, authorization_now_epoch)
             executed_this_run += 1
