@@ -271,7 +271,9 @@ class SQLiteTaskStore:
 
     @classmethod
     def _verify_rows(cls, rows: Sequence[sqlite3.Row]) -> bool:
+        """Verify hashes, sequence continuity and legal state transitions."""
         previous = _ZERO_HASH
+        previous_payload: dict[str, Any] | None = None
         for sequence, row in enumerate(rows):
             if row["sequence"] != sequence or row["previous_hash"] != previous:
                 return False
@@ -294,8 +296,78 @@ class SQLiteTaskStore:
                 return False
             if not hmac.compare_digest(computed, row["event_hash"]):
                 return False
+
+            if sequence == 0:
+                if (
+                    row["event_type"] != "task.created"
+                    or payload.get("state") != TaskState.CREATED.value
+                    or payload.get("version") != 0
+                    or payload.get("attempts") != 1
+                    or payload.get("last_event") is not None
+                    or not isinstance(payload.get("max_attempts"), int)
+                    or not 1 <= payload["max_attempts"] <= 5
+                ):
+                    return False
+            else:
+                if previous_payload is None:
+                    return False
+                if (
+                    payload.get("version") != sequence
+                    or payload.get("previous_version") != sequence - 1
+                    or payload.get("previous_state") != previous_payload.get("state")
+                    or payload.get("max_attempts") != previous_payload.get("max_attempts")
+                    or payload.get("last_event") != row["event_type"]
+                ):
+                    return False
+                try:
+                    previous_task = TaskRecord(
+                        task_id=row["task_id"],
+                        state=TaskState(previous_payload["state"]),
+                        version=previous_payload["version"],
+                        attempts=previous_payload["attempts"],
+                        max_attempts=previous_payload["max_attempts"],
+                        last_event=(
+                            TaskEvent(previous_payload["last_event"])
+                            if previous_payload.get("last_event") is not None
+                            else None
+                        ),
+                    )
+                    expected_task = previous_task.apply(
+                        TaskEvent(row["event_type"]),
+                        expected_version=previous_task.version,
+                    )
+                except (KeyError, TypeError, ValueError):
+                    return False
+                if (
+                    payload.get("state") != expected_task.state.value
+                    or payload.get("version") != expected_task.version
+                    or payload.get("attempts") != expected_task.attempts
+                    or payload.get("max_attempts") != expected_task.max_attempts
+                    or payload.get("last_event") != expected_task.last_event.value
+                ):
+                    return False
+
             previous = row["event_hash"]
-        return True
+            previous_payload = payload
+        return bool(rows)
+
+    @classmethod
+    def _latest_matches_task(
+        cls,
+        task_row: sqlite3.Row,
+        rows: Sequence[sqlite3.Row],
+    ) -> bool:
+        if not rows:
+            return False
+        payload = cls._row_payload(rows[-1])
+        return (
+            rows[-1]["sequence"] == task_row["version"]
+            and payload.get("version") == task_row["version"]
+            and payload.get("state") == task_row["state"]
+            and payload.get("attempts") == task_row["attempts"]
+            and payload.get("max_attempts") == task_row["max_attempts"]
+            and payload.get("last_event") == task_row["last_event"]
+        )
 
     @staticmethod
     def _audit_rows(
