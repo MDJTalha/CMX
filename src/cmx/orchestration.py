@@ -594,12 +594,9 @@ class ExecutionCoordinator:
                         authorization_now_epoch=authorization_now_epoch,
                     )
                     self._release_lease(lease, identity, authorization_now_epoch)
-                    current = self.workflow_store.get_workflow(
-                        task_id, principal=identity, authorization_now_epoch=authorization_now_epoch
-                    )
-                    return self._outcome(
-                        current,
-                        message=(
+                    return self._finish_failure(
+                        task_id, identity, authorization_now_epoch,
+                        (
                             "A durable idempotency record already exists for this operation "
                             f"(state: {idempotency_record.state}). Handler replay was blocked."
                         ),
