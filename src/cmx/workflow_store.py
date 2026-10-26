@@ -814,7 +814,7 @@ class SQLiteWorkflowStore:
         else:
             row = connection.execute(
                 """
-                SELECT step_id, status, attempts, output_json, error_code,
+                SELECT step_id, capability_fingerprint, status, attempts, output_json, error_code,
                        approval_requested_by, approved_by, approved_at,
                        approval_fingerprint, updated_at
                 FROM cmx_workflow_steps
@@ -997,6 +997,7 @@ class SQLiteWorkflowStore:
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._assert_workflow_integrity(connection, identity.tenant_id, task_id)
                 plan_row = self._plan_row(connection, identity.tenant_id, task_id)
                 row = connection.execute(
                     "SELECT * FROM cmx_workflow_steps WHERE tenant_id = ? AND task_id = ? AND step_id = ?",
@@ -1065,6 +1066,7 @@ class SQLiteWorkflowStore:
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._assert_workflow_integrity(connection, identity.tenant_id, task_id)
                 plan_row = self._plan_row(connection, identity.tenant_id, task_id)
                 row = connection.execute(
                     "SELECT * FROM cmx_workflow_steps WHERE tenant_id = ? AND task_id = ? AND step_id = ?",
@@ -1152,6 +1154,7 @@ class SQLiteWorkflowStore:
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._assert_workflow_integrity(connection, identity.tenant_id, task_id)
                 plan_row = self._plan_row(connection, identity.tenant_id, task_id)
                 row = connection.execute(
                     "SELECT status FROM cmx_workflow_steps WHERE tenant_id = ? AND task_id = ? AND step_id = ?",
@@ -1204,6 +1207,7 @@ class SQLiteWorkflowStore:
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._assert_workflow_integrity(connection, identity.tenant_id, task_id)
                 plan_row = self._plan_row(connection, identity.tenant_id, task_id)
                 row = connection.execute(
                     "SELECT status FROM cmx_workflow_steps WHERE tenant_id = ? AND task_id = ? AND step_id = ?",
@@ -1321,6 +1325,7 @@ class SQLiteWorkflowStore:
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                self._assert_workflow_integrity(connection, identity.tenant_id, task_id)
                 plan_row = self._plan_row(connection, identity.tenant_id, task_id)
                 row = connection.execute(
                     "SELECT status FROM cmx_workflow_steps WHERE tenant_id = ? AND task_id = ? AND step_id = ?",
