@@ -623,5 +623,7 @@ def test_existing_idempotency_reservation_blocks_handler_dispatch(tmp_path):
     )
     assert calls == []
     assert final.steps[0].status == "interrupted"
+    assert final.task.state == TaskState.FAILED
+    assert outcome.task_state == TaskState.FAILED
     assert outcome.workflow_state == "failed"
     assert "replay was blocked" in outcome.message.lower()
