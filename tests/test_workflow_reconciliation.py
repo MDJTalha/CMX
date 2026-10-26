@@ -583,10 +583,10 @@ def test_retry_authorization_is_durable_audited_and_does_not_start_retry(tmp_pat
     assert result["automatic_replay"] is False
     assert result["single_use_enforced"] is False
     assert event.event_type == "step.retry_authorization_recorded"
-    assert event.payload["authorization_id"] == result["authorization_id"]
-    assert event.payload["review_event_id"] == result["review_event_id"]
-    assert event.payload["automatic_replay"] is False
-    assert event.payload["retry_started"] is False
+    assert event.payload["details"]["authorization_id"] == result["authorization_id"]
+    assert event.payload["details"]["review_event_id"] == result["review_event_id"]
+    assert event.payload["details"]["automatic_replay"] is False
+    assert event.payload["details"]["retry_started"] is False
     assert before.steps[0].status == after.steps[0].status == "interrupted"
     assert before.steps[0].attempts == after.steps[0].attempts == 1
 
