@@ -1,7 +1,7 @@
 import pytest
 
 from cmx.workflow_reconciliation import SQLiteWorkflowReconciler
-from cmx.workflow_store import WorkflowConflictError
+from cmx.workflow_store import WorkflowConflictError, WorkflowNotFoundError
 from cmx.security import AuthorizationError
 from cmx.worker_leases import SQLiteWorkerLeaseStore
 from cmx.kernel import CapabilityRegistry, CapabilitySpec
@@ -737,13 +737,12 @@ def test_retry_authorization_consumption_is_tenant_scoped(tmp_path):
         principal=owner, occurred_at=211, authorization_now_epoch=211,
     )
     other_tenant = owner.model_copy(update={"tenant_id": "tenant_other"})
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(WorkflowNotFoundError):
         reconciler.consume_retry_authorization(
             "task_retry_auth", "step_retry_auth", authorization["authorization_id"],
             registry=registry, principal=other_tenant,
             occurred_at=212, authorization_now_epoch=212,
         )
-    assert "not found" in str(exc_info.value).lower()
     events = store.list_workflow_events(
         "task_retry_auth", principal=owner, authorization_now_epoch=213,
     )
