@@ -36,7 +36,8 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Bind approval records to plan hash, inputs and capability-contract fingerprint
 - [x] Add an opt-in fixed-command subprocess adapter with parent-enforced deadlines, bounded JSON streams and explicit unknown-outcome errors
 - [ ] Add OS-level sandbox/descendant-process supervision, resource quotas and safe retry/idempotency reconciliation
-- [ ] Add background worker scheduling and multi-worker claim/lease semantics
+- [ ] Integrate worker lease fencing into coordinator step transitions and add background scheduling
+- [x] Add SQLite-backed worker reservation records with expiry and monotonically increasing fencing tokens (reservation primitive only; not yet execution-enforced)
 - [x] Add file-backed SQLite task persistence, optimistic version checks and transactional audit append tests
 
 ## Phase 3 — Evidence retrieval and model adapters
@@ -72,4 +73,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The latest execution increment adds an opt-in fixed-command subprocess handler adapter with hard parent-side deadlines, bounded JSON input/output/error streams, explicit environment configuration and safe error codes. A timeout is recorded as an unknown outcome because terminating a process cannot prove that a remote side effect did not occur. This is not a sandbox; OS-level containment and descendant-process supervision remain open. See docs/isolated-execution.md. The preceding authentication increment adds server-side service bearer credentials for the assessment endpoint; it is not a human identity system. All draft PRs remain unmerged.
+The worker-lease increment introduces a tenant-scoped SQLite reservation primitive with atomic claims, expiry, renewal/release and monotonic fencing tokens. It deliberately does not claim to be a complete queue or an execution lock: coordinator integration must enforce fencing tokens before workers can safely execute and commit workflow steps. See `docs/worker-leases.md`. All draft PRs remain unmerged.

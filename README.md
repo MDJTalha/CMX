@@ -81,7 +81,7 @@ Example request: examples/assessment.json
 
 ## Roadmap
 
-See docs/roadmap.md for the staged plan, docs/architecture.md for the trust boundary and scoring semantics, docs/authorization-model.md for service credentials, and docs/isolated-execution.md for subprocess handler limits.
+See docs/roadmap.md for the staged plan, docs/architecture.md for the trust boundary and scoring semantics, docs/authorization-model.md for service credentials, docs/isolated-execution.md for subprocess handler limits, and docs/worker-leases.md for worker reservation limits.
 
 ## Brand
 
