@@ -125,3 +125,49 @@ def test_membership_grants_reject_invalid_permission_patterns(tmp_path):
             issuer=ISSUER, subject="idp-subject-123", tenant_id="tenant_alpha",
             permissions={"Admin:*"}, now_epoch=100,
         )
+
+def test_api_dependency_can_select_oidc_mode_without_service_key_fallback(monkeypatch):
+    from fastapi import HTTPException
+    from fastapi.security import HTTPAuthorizationCredentials
+    import cmx.main as main
+
+    principal = setup_principal_for_api()
+    class FakeAuthenticator:
+        def authenticate(self, token, *, tenant_id):
+            assert token == "signed-token"
+            assert tenant_id == "tenant_alpha"
+            return principal
+
+    monkeypatch.setenv("CMX_AUTH_MODE", "oidc")
+    monkeypatch.setenv("CMX_OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("CMX_OIDC_AUDIENCE", AUDIENCE)
+    monkeypatch.setenv("CMX_OIDC_JWKS_URL", JWKS)
+    monkeypatch.setattr(main, "_oidc_authenticator_for_config", lambda *args: FakeAuthenticator())
+    result = main.require_service_principal(
+        HTTPAuthorizationCredentials(scheme="Bearer", credentials="signed-token"),
+        tenant_id="tenant_alpha",
+    )
+    assert result is principal
+
+
+def setup_principal_for_api():
+    from cmx.security import PrincipalContext
+    return PrincipalContext(
+        subject_id="oidc_test_subject", tenant_id="tenant_alpha", issuer=ISSUER,
+        permissions=frozenset({"assessment:write"}), issued_at=100, expires_at=200,
+        authentication_verified=True, authentication_method="oidc",
+    )
+
+
+def test_oidc_api_mode_requires_tenant_selector(monkeypatch):
+    from fastapi import HTTPException
+    from fastapi.security import HTTPAuthorizationCredentials
+    import cmx.main as main
+
+    monkeypatch.setenv("CMX_AUTH_MODE", "oidc")
+    with pytest.raises(HTTPException) as error:
+        main.require_service_principal(
+            HTTPAuthorizationCredentials(scheme="Bearer", credentials="signed-token"),
+            tenant_id=None,
+        )
+    assert error.value.status_code == 400
