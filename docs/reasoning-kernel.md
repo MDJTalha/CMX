@@ -52,4 +52,6 @@ The registry is an explicit allowlist. Unknown and disabled capabilities fail cl
 
 Automated tests cover legal and illegal state transitions, stale versions, terminal-state behavior, bounded retries, approval rejection, duplicate capabilities, disabled/unknown capabilities, permission enforcement, invalid dependency graphs and approval/retry-policy enforcement.
 
-Future increments should add schema validation, a persistent audit log, identity-bound permissions, a verifier interface, cancellation semantics for in-flight work, and integration tests before enabling any real executor.
+Verification contracts are now included. Each contract must define at least one mandatory criterion; duplicate or unexpected results are rejected. A failed mandatory criterion yields failed verification, while missing/unknown mandatory evidence yields blocked verification. Only passing every mandatory criterion yields a passed result. This is a deterministic contract evaluator, not an independent external verifier: evidence quality still depends on the trusted caller.
+
+Future increments should add payload validation against JSON Schema, a persistent audit log, identity-bound permissions, cancellation semantics for in-flight work, and integration tests before enabling any real executor.
