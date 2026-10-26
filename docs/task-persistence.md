@@ -22,7 +22,7 @@ Each event records:
 - Structured JSON payload.
 - Hash of the previous event and hash of the canonical current event.
 
-The event hash is SHA-256 over a canonical JSON representation with stable key ordering. Database triggers reject ordinary UPDATE and DELETE statements against audit events. On append, existing history is checked before extending the chain. Integrity verification checks sequence continuity, predecessor hashes, each event hash and agreement between the latest event payload and the current task row.
+The event hash is SHA-256 over a canonical JSON representation with stable key ordering. Database triggers reject ordinary UPDATE and DELETE statements against audit events. On append, existing history is checked before extending the chain. Integrity verification checks sequence continuity, predecessor hashes, each event hash, the legality and continuity of recorded state transitions, non-decreasing event timestamps, and agreement between the latest event payload and the current task row. Reads and transitions fail closed if the persisted task row does not match its audit history.
 
 ## Guarantees and limits
 
