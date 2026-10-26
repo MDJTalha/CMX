@@ -513,7 +513,16 @@ def test_success_resolution_rolls_back_task_and_workflow_when_task_audit_fails(t
         notes="Provider confirms the operation completed.",
         principal=identity, occurred_at=210, authorization_now_epoch=210,
     )
-    registry = _success_registry()
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
     before = store.get_workflow("task_001", principal=identity, authorization_now_epoch=211)
     before_workflow_events = store.list_workflow_events(
         "task_001", principal=identity, authorization_now_epoch=211,
