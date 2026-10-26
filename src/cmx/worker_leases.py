@@ -151,6 +151,36 @@ class SQLiteWorkerLeaseStore:
             worker_id=worker_id, fencing_token=token, expires_at=expires,
         )
 
+    def get_active(
+        self,
+        task_id: str,
+        step_id: str,
+        *,
+        principal: PrincipalContext | None,
+        now_epoch: int | None = None,
+        authorization_now_epoch: int | None = None,
+    ) -> WorkerLease | None:
+        """Return the current unexpired lease for a tenant-scoped step, if any."""
+        identity = self._authorize(principal, authorization_now_epoch)
+        _validate_identifier(task_id, "task_id")
+        _validate_identifier(step_id, "step_id")
+        now = int(time.time()) if now_epoch is None else now_epoch
+        if isinstance(now, bool) or not isinstance(now, int) or now < 0:
+            raise ValueError("now_epoch must be a non-negative integer.")
+        with self.task_store._connection() as connection:
+            row = connection.execute(
+                """SELECT worker_id, fencing_token, expires_at FROM cmx_worker_leases
+                   WHERE tenant_id=? AND task_id=? AND step_id=?""",
+                (identity.tenant_id, task_id, step_id),
+            ).fetchone()
+        if row is None or row["expires_at"] <= now:
+            return None
+        return WorkerLease(
+            tenant_id=identity.tenant_id, task_id=task_id, step_id=step_id,
+            worker_id=row["worker_id"], fencing_token=row["fencing_token"],
+            expires_at=row["expires_at"],
+        )
+
     def renew(
         self,
         lease: WorkerLease,

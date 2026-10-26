@@ -11,3 +11,10 @@ This is a **reservation primitive, not a complete background worker system**. It
 SQLite is a single-node reference backend. `BEGIN IMMEDIATE` provides local database serialization, not a distributed lease service for independently hosted nodes sharing an unreliable network filesystem. Multi-node deployments should use a database and locking model designed for that topology.
 
 Lease expiry is not proof that a previous handler stopped or that an external side effect did not happen. A reclaimed lease must not trigger blind replay. Reconcile external state with a stable idempotency key before retrying side-effecting work.
+
+
+## Coordinator integration
+
+The execution coordinator now creates a unique worker identity, atomically claims a pending step before starting it, and passes the lease's worker ID and fencing token into start, completion and handler-failure transitions. A second coordinator that sees a running step with a live lease returns the current running outcome instead of marking it interrupted. A running step with no live lease remains an uncertain outcome and is interrupted without automatic replay.
+
+The coordinator currently requests the maximum supported one-hour lease. Automatic lease heartbeats and hard cancellation of in-process handlers are not implemented; if a handler outlives its lease, fenced completion is rejected and the step must be reconciled deliberately. This remains a single-node SQLite coordination design, not a distributed queue or OS-level sandbox.

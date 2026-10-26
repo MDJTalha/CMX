@@ -86,3 +86,8 @@ See docs/roadmap.md for the staged plan, docs/architecture.md for the trust boun
 ## Brand
 
 **CMX** means **Customer & Market Experience**. It is the chosen working brand; trademark and domain clearance remain separate tasks.
+
+
+### Worker execution safety
+
+Workflow execution uses tenant-scoped SQLite worker leases with monotonically increasing fencing tokens. The coordinator claims a pending step before invoking its handler and requires the same lease token for persisted start/completion/failure transitions. Concurrent coordinator calls leave a step with a live lease untouched. Expired or uncertain work is not automatically replayed. See [worker lease documentation](docs/worker-leases.md) for current limits, including the lack of lease heartbeats and distributed scheduling.
