@@ -42,14 +42,19 @@ class SQLiteWorkflowReconciler:
         current = SQLiteTaskStore._task_from_row(row)
         if current.state == TaskState.FAILED:
             return current.state
-        if current.state not in {TaskState.PLANNED, TaskState.RUNNING}:
+        if current.state not in {TaskState.CREATED, TaskState.PLANNED, TaskState.RUNNING}:
             raise WorkflowConflictError(
-                "Reconciliation resolution requires a planned/running task or an already failed task."
+                "Reconciliation resolution requires a nonterminal task or an already failed task."
             )
 
-        # A submitted workflow can still have task state 'planned' because execution is
-        # tracked separately at the step level. Follow legal task transitions in order.
-        events = [TaskEvent.START, TaskEvent.ERROR] if current.state == TaskState.PLANNED else [TaskEvent.ERROR]
+        # Submission persists a created task; workflow-step execution is tracked separately.
+        # Follow the legal task lifecycle in order, entirely within this transaction.
+        if current.state == TaskState.CREATED:
+            events = [TaskEvent.PLAN_ACCEPTED, TaskEvent.START, TaskEvent.ERROR]
+        elif current.state == TaskState.PLANNED:
+            events = [TaskEvent.START, TaskEvent.ERROR]
+        else:
+            events = [TaskEvent.ERROR]
         for event in events:
             updated = current.apply(event, expected_version=current.version)
             cursor = connection.execute(
