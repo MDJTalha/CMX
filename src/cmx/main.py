@@ -12,7 +12,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from cmx import __version__
 from cmx.engine import evaluate_decision
 from cmx.models import DecisionRequest, DecisionResponse
-from cmx.oidc_auth import OIDCAuthenticator, OIDCIdentityStore
+from cmx.oidc_auth import OIDCAuthenticator, OIDCIdentityStore, OIDCProviderUnavailable
 from cmx.security import AuthorizationError, PrincipalContext, authorize_permissions
 from cmx.service_auth import (
     CredentialStoreIntegrityError,
@@ -89,6 +89,11 @@ def require_service_principal(
                 status_code=status_code,
                 detail="The OIDC identity could not be authenticated or authorized.",
                 headers={"WWW-Authenticate": "Bearer"} if status_code == 401 else None,
+            ) from exc
+        except OIDCProviderUnavailable as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="The configured identity provider is temporarily unavailable.",
             ) from exc
         except (OSError, sqlite3.Error, ValueError) as exc:
             raise HTTPException(
