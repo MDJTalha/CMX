@@ -1191,7 +1191,11 @@ class SQLiteWorkflowStore:
         authorization_now_epoch: int | None = None,
         worker_id: str | None = None,
         fencing_token: int | None = None,
+        idempotency_store: Any | None = None,
+        idempotency_key: str | None = None,
     ) -> WorkflowStepRecord:
+        if (idempotency_store is None) != (idempotency_key is None):
+            raise ValueError("idempotency_store and idempotency_key must be supplied together.")
         identity = self._authorize(
             principal, {"workflow:execute", "tasks:write"}, authorization_now_epoch
         )
@@ -1229,6 +1233,11 @@ class SQLiteWorkflowStore:
                     actor_id=identity.subject_id, occurred_at=timestamp,
                     event_type="step.succeeded", workflow_state=plan_row["state"], step_id=step_id,
                 )
+                if idempotency_store is not None and idempotency_key is not None:
+                    idempotency_store._mark_succeeded_in_transaction(
+                        connection, idempotency_key, output_payload,
+                        principal=identity, occurred_at=timestamp,
+                    )
                 final = connection.execute(
                     "SELECT * FROM cmx_workflow_steps WHERE tenant_id = ? AND task_id = ? AND step_id = ?",
                     (identity.tenant_id, task_id, step_id),
