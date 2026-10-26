@@ -43,9 +43,9 @@ The registry is an explicit allowlist. Unknown and disabled capabilities fail cl
 ## Security boundaries and limitations
 
 - Input and output payloads can now be checked against declared JSON Schemas, including plan-step inputs before execution. This still does not invoke an executor or prove that a real-world side effect occurred.
-- A permission set passed by a caller is not authentication. Production must derive permissions from a trusted identity and authorization service.
+- The kernel now requires a tenant-scoped PrincipalContext with an upstream-verified identity flag, permissions, issuer, issue/expiry timestamps and a matching resource tenant. The authorization policy fails closed for absent/unverified, not-yet-valid, expired, cross-tenant and underprivileged contexts. This context is an internal contract, not an authentication provider: a trusted adapter must verify the actual credential and must never build it from client-supplied JSON.
 - Human approval is represented as a required workflow condition, not a UI, cryptographic approval record or notification system.
-- No LLM, web retrieval, ML model, neural network, quantum-computing service, database, authentication provider or external action is connected.
+- No LLM, web retrieval, ML model, neural network, quantum-computing service, database, real authentication provider/session verifier, credential revocation service or external action is connected.
 - Do not expose the service publicly until authentication, tenant isolation, authorization, rate limits, audit logging, secrets handling, privacy controls and security testing are implemented.
 
 ## Verification approach
@@ -54,4 +54,4 @@ Automated tests cover legal and illegal state transitions, stale versions, termi
 
 Verification contracts are now included. Each contract must define at least one mandatory criterion; duplicate or unexpected results are rejected. A failed mandatory criterion yields failed verification, while missing/unknown mandatory evidence yields blocked verification. Only passing every mandatory criterion yields a passed result. This is a deterministic contract evaluator, not an independent external verifier: evidence quality still depends on the trusted caller.
 
-Future increments should add trusted identity-bound permissions, persistent task storage and audit records, cancellation semantics for in-flight work, an executor interface with timeout/idempotency boundaries, and end-to-end integration tests before enabling any real executor.
+Future increments should connect a real authentication adapter/session verifier to PrincipalContext, add credential revocation and durable task/audit persistence, define cancellation semantics for in-flight work, implement an executor interface with timeout/idempotency boundaries, and add end-to-end integration tests before enabling any real executor.

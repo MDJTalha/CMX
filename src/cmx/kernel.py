@@ -5,12 +5,14 @@ The kernel defines contracts only. It does not execute arbitrary tools or extern
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from cmx.schema_validation import validate_json_payload, validate_json_schema
+from cmx.security import PrincipalContext, authorize_permissions
 
 
 class TaskState(StrEnum):
@@ -155,12 +157,19 @@ class CapabilitySpec(BaseModel):
         validate_json_schema(value)
         return value
 
+    @field_validator("required_permissions")
+    @classmethod
+    def permission_keys_are_valid(cls, value: list[str]) -> list[str]:
+        if any(not re.fullmatch(r"^[a-z][a-z0-9_.:-]{1,127}$", item) for item in value):
+            raise ValueError("required_permissions contain an invalid permission key.")
+        if len(value) != len(set(value)):
+            raise ValueError("required_permissions must be unique.")
+        return value
+
     @model_validator(mode="after")
     def side_effects_require_approval(self) -> "CapabilitySpec":
         if self.has_side_effects and not self.approval_required:
             raise ValueError("Capabilities with side effects must require human approval.")
-        if len(self.required_permissions) != len(set(self.required_permissions)):
-            raise ValueError("required_permissions must be unique.")
         return self
 
 
@@ -221,7 +230,7 @@ class ExecutionPlan(BaseModel):
 
 
 class CapabilityRegistry:
-    """In-memory allowlist of declared capabilities and their security contracts."""
+    """In-memory capability allowlist governed by trusted tenant-scoped identity context."""
 
     def __init__(self) -> None:
         self._capabilities: dict[str, CapabilitySpec] = {}
@@ -240,13 +249,22 @@ class CapabilityRegistry:
             raise PermissionError(f"Capability '{capability_id}' is disabled.")
         return capability
 
-    def authorize(self, capability_id: str, granted_permissions: set[str]) -> CapabilitySpec:
+    def authorize(
+        self,
+        capability_id: str,
+        *,
+        principal: PrincipalContext | None,
+        resource_tenant_id: str,
+        now_epoch: int | None = None,
+    ) -> CapabilitySpec:
+        """Authorize against an internal trusted principal, its tenant and expiry."""
         capability = self.get(capability_id)
-        missing = set(capability.required_permissions) - granted_permissions
-        if missing:
-            raise PermissionError(
-                f"Capability '{capability_id}' requires permissions: {', '.join(sorted(missing))}."
-            )
+        authorize_permissions(
+            principal,
+            required_permissions=frozenset(capability.required_permissions),
+            resource_tenant_id=resource_tenant_id,
+            now_epoch=now_epoch,
+        )
         return capability
 
     def validate_input(
@@ -254,10 +272,17 @@ class CapabilityRegistry:
         capability_id: str,
         payload: dict[str, Any],
         *,
-        granted_permissions: set[str],
+        principal: PrincipalContext | None,
+        resource_tenant_id: str,
+        now_epoch: int | None = None,
     ) -> CapabilitySpec:
-        """Authorize a capability and validate its input before any execution."""
-        capability = self.authorize(capability_id, granted_permissions)
+        """Authorize and validate input before any execution."""
+        capability = self.authorize(
+            capability_id,
+            principal=principal,
+            resource_tenant_id=resource_tenant_id,
+            now_epoch=now_epoch,
+        )
         validate_json_payload(
             capability.input_schema,
             payload,
@@ -270,10 +295,17 @@ class CapabilityRegistry:
         capability_id: str,
         payload: Any,
         *,
-        granted_permissions: set[str],
+        principal: PrincipalContext | None,
+        resource_tenant_id: str,
+        now_epoch: int | None = None,
     ) -> CapabilitySpec:
-        """Authorize a capability and validate its result before accepting it."""
-        capability = self.authorize(capability_id, granted_permissions)
+        """Authorize and validate a result before it can be accepted."""
+        capability = self.authorize(
+            capability_id,
+            principal=principal,
+            resource_tenant_id=resource_tenant_id,
+            now_epoch=now_epoch,
+        )
         validate_json_payload(
             capability.output_schema,
             payload,
@@ -285,11 +317,18 @@ class CapabilityRegistry:
         self,
         plan: ExecutionPlan,
         *,
-        granted_permissions: set[str],
+        principal: PrincipalContext | None,
+        resource_tenant_id: str,
+        now_epoch: int | None = None,
     ) -> None:
-        """Check every step, including schema-valid input, without executing anything."""
+        """Validate authorization and every step's input without executing anything."""
         for step in plan.steps:
-            capability = self.authorize(step.capability_id, granted_permissions)
+            capability = self.authorize(
+                step.capability_id,
+                principal=principal,
+                resource_tenant_id=resource_tenant_id,
+                now_epoch=now_epoch,
+            )
             validate_json_payload(
                 capability.input_schema,
                 step.input_payload,

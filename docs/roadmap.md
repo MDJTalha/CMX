@@ -27,7 +27,8 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Plan representation with dependency validation and retry limits
 - [x] Independent verification contracts and testable completion criteria
 - [x] Deterministic core remains usable without an LLM
-- [ ] Bind permissions to authenticated identities and durable audit records
+- [x] Add fail-closed tenant-scoped authorization policy against an internally supplied principal context
+- [ ] Connect a real authentication/session verifier and persist identity-bound audit records
 - [x] Validate capability schemas and plan inputs against bounded JSON Schema Draft 2020-12 contracts
 - [ ] Add a constrained executor interface
 - [ ] Add persistent task storage and concurrency tests
@@ -64,4 +65,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The task-state, capability-registry, bounded JSON Schema validation and fail-closed verification contracts are implemented on the current development branch in src/cmx/kernel.py and src/cmx/schema_validation.py. They validate state transitions, bounded retries, plan dependency graphs, capability allowlists, caller-provided permission requirements, plan input payloads and evidence-based completion status. They do not execute tools, authenticate callers or persist task state. See docs/reasoning-kernel.md.
+The current development branch contains task-state and capability-registry contracts, bounded JSON Schema validation, fail-closed tenant-scoped authorization policy, and fail-closed verification contracts in src/cmx/kernel.py, src/cmx/schema_validation.py and src/cmx/security.py. These contracts validate state transitions, bounded retries, plan dependency graphs, capability allowlists, plan input payloads, required permissions, tenant boundaries and expiry of an internally supplied PrincipalContext. They do not verify real credentials, execute tools or persist task state. See docs/reasoning-kernel.md and docs/authorization-model.md.
