@@ -52,3 +52,9 @@ This increment does not implement automatic step retries. Per-step attempt limit
 - The success criteria confirm task/step completion and schema conformance; they do not independently prove a real-world business outcome.
 - Recovery stops on an uncertain in-flight step rather than retrying automatically.
 - Production data-retention, backup/restore, secrets handling, monitoring, and isolation of untrusted handlers remain separate release requirements.
+
+### Process-tree cleanup boundaries
+
+The fixed-command subprocess adapter starts a new POSIX session and terminates the process group on timeout or bounded-stream overflow. On Windows, cleanup invokes `taskkill /PID <pid> /T /F` with `shell=False` and a bounded timeout, then falls back to direct-child termination if the utility is unavailable or fails. Regression tests exercise both Windows code paths without requiring a Windows runner.
+
+This is best-effort descendant cleanup, **not** a security sandbox. It does not enforce CPU/memory quotas, filesystem/network restrictions, or Windows Job Object kill-on-close semantics. Production execution of untrusted handlers remains blocked on a separately provisioned isolation boundary (for example, a restricted container/worker or a Windows Job Object implementation) and platform-specific integration verification.
