@@ -7,7 +7,7 @@ from __future__ import annotations
 import hmac
 from typing import Any, Literal
 
-from cmx.kernel import CapabilityRegistry
+from cmx.kernel import CapabilityRegistry, ExecutionPlan
 from cmx.schema_validation import validate_json_payload
 from cmx.persistence import _timestamp, _validate_identifier
 from cmx.security import PrincipalContext
