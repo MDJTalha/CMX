@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from functools import lru_cache
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -20,6 +21,13 @@ from cmx.service_auth import (
 
 _bearer_scheme = HTTPBearer(auto_error=False, scheme_name="CMXServiceBearer")
 _AUTH_DATABASE_DEFAULT = "data/cmx-auth.sqlite3"
+
+
+@lru_cache(maxsize=16)
+def _credential_store_for_path(database_path: str) -> SQLiteCredentialStore:
+    """Initialize each configured local store once per process, not per request."""
+    return SQLiteCredentialStore(database_path)
+
 
 app = FastAPI(
     title="CMX Decision Engine",
@@ -47,7 +55,7 @@ def require_service_principal(
 
     database_path = os.environ.get("CMX_AUTH_DB_PATH", _AUTH_DATABASE_DEFAULT)
     try:
-        store = SQLiteCredentialStore(database_path)
+        store = _credential_store_for_path(database_path)
         return store.authenticate(credentials.credentials)
     except InvalidServiceCredential as exc:
         raise HTTPException(
