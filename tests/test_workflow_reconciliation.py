@@ -770,3 +770,36 @@ def test_retry_authorization_consumption_requires_reconciliation_permission(tmp_
             registry=registry, principal=unauthorized,
             occurred_at=212, authorization_now_epoch=212,
         )
+
+
+
+def test_retry_authorization_consumption_rejects_capability_version_drift(tmp_path):
+    _, _, owner, registry, reconciler = _retry_authorization_fixture(tmp_path)
+    authorization = reconciler.record_retry_authorization(
+        "task_retry_auth", "step_retry_auth", registry=registry,
+        principal=owner, occurred_at=211, authorization_now_epoch=211,
+    )
+    drifted_registry = CapabilityRegistry()
+    drifted_registry.register(CapabilitySpec(
+        capability_id="demo.transform", version="2.0.0",
+        name="Transform demo value",
+        description="Changed capability contract for stale authorization test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=1,
+    ))
+    with pytest.raises(WorkflowConflictError, match="capability contract changed"):
+        reconciler.consume_retry_authorization(
+            "task_retry_auth", "step_retry_auth", authorization["authorization_id"],
+            registry=drifted_registry, principal=owner,
+            occurred_at=212, authorization_now_epoch=212,
+        )
+    events = reconciler.workflow_store.list_workflow_events(
+        "task_retry_auth", principal=owner, authorization_now_epoch=213,
+    )
+    assert not any(
+        event.event_type == "step.retry_authorization_consumed"
+        for event in events
+    )
