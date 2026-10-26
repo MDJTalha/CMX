@@ -1,0 +1,12 @@
+{
+  "problem_statement": "Reduce manual customer enquiry triage and routing.",
+  "desired_outcome": "Route enquiries faster while preserving human approval for uncertain cases.",
+  "region": "PK",
+  "max_first_year_cost_usd": 1500,
+  "requirements": [
+    {"key": "email_integration", "label": "Works with existing email", "mandatory": true, "weight": 5},
+    {"key": "human_review", "label": "Human review for consequential actions", "mandatory": true, "weight": 5},
+    {"key": "analytics", "label": "Basic workflow reporting", "mandatory": false, "weight": 2}
+  ],
+  "candidates": []
+}
