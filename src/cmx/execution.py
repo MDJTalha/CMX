@@ -80,9 +80,9 @@ class SubprocessJSONHandler:
     def _terminate(process: subprocess.Popen[bytes], grace: float) -> None:
         """Terminate the process group on POSIX, not just the immediate child.
 
-        On Windows, this fallback terminates the direct child only. Production Windows
-        workers must run inside a Job Object configured with kill-on-close and resource
-        limits; stdlib Popen does not provide a safe portable Job Object API.
+        On Windows, taskkill /T is used to terminate the process tree with a bounded
+        timeout, followed by a direct-child fallback. This is not a Job Object: it does
+        not enforce CPU/memory quotas or provide kill-on-close semantics.
         """
         if os.name == "posix":
             try:
@@ -113,6 +113,28 @@ class SubprocessJSONHandler:
                 except (subprocess.TimeoutExpired, OSError):
                     pass
             return
+
+        if os.name == "nt":
+            # taskkill /T asks Windows to terminate the complete descendant tree.
+            # It is invoked without a shell and with a hard timeout; if unavailable,
+            # fall back to direct-child termination rather than hanging the worker.
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    shell=False,
+                    timeout=max(1.0, min(3.0, grace + 1.0)),
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            try:
+                process.wait(timeout=max(0.1, grace))
+                return
+            except (subprocess.TimeoutExpired, OSError):
+                pass
 
         if process.poll() is not None:
             return
