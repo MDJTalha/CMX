@@ -1,6 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
+from cmx.security import AuthorizationError, PrincipalContext
+
 from cmx.kernel import (
     CapabilityRegistry,
     CapabilitySpec,
@@ -28,6 +30,22 @@ def capability(**overrides) -> CapabilitySpec:
     }
     values.update(overrides)
     return CapabilitySpec(**values)
+
+
+def make_principal(**overrides) -> PrincipalContext:
+    values = {
+        "subject_id": "user_001",
+        "tenant_id": "tenant_alpha",
+        "issuer": "https://identity.cmx.test",
+        "permissions": frozenset({"assessment:read"}),
+        "issued_at": 100,
+        "expires_at": 200,
+        "authentication_verified": True,
+        "authentication_method": "test",
+        "credential_id": "cred_001",
+    }
+    values.update(overrides)
+    return PrincipalContext(**values)
 
 
 def plan(steps: list[PlanStep]) -> ExecutionPlan:
@@ -102,9 +120,20 @@ def test_unknown_or_disabled_capabilities_are_not_authorized():
 def test_capability_permission_requirements_are_enforced():
     registry = CapabilityRegistry()
     registry.register(capability())
-    with pytest.raises(PermissionError, match="assessment:read"):
-        registry.authorize("assessment.evaluate", set())
-    assert registry.authorize("assessment.evaluate", {"assessment:read"}).capability_id == "assessment.evaluate"
+    with pytest.raises(AuthorizationError) as captured:
+        registry.authorize(
+            "assessment.evaluate",
+            principal=make_principal(permissions=frozenset()),
+            resource_tenant_id="tenant_alpha",
+            now_epoch=150,
+        )
+    assert captured.value.code == "missing_permission"
+    assert registry.authorize(
+        "assessment.evaluate",
+        principal=make_principal(),
+        resource_tenant_id="tenant_alpha",
+        now_epoch=150,
+    ).capability_id == "assessment.evaluate"
 
 
 def test_plan_rejects_unknown_dependencies():
@@ -157,7 +186,7 @@ def test_plan_enforces_capability_approval_and_retry_limits():
         )
     ])
     with pytest.raises(PermissionError, match="human approval"):
-        registry.validate_plan(unsafe_plan, granted_permissions={"assessment:read"})
+        registry.validate_plan(unsafe_plan, principal=make_principal(), resource_tenant_id="tenant_alpha", now_epoch=150)
 
     too_many_retries = plan([
         PlanStep(
@@ -169,7 +198,7 @@ def test_plan_enforces_capability_approval_and_retry_limits():
         )
     ])
     with pytest.raises(ValueError, match="retry limit"):
-        registry.validate_plan(too_many_retries, granted_permissions={"assessment:read"})
+        registry.validate_plan(too_many_retries, principal=make_principal(), resource_tenant_id="tenant_alpha", now_epoch=150)
 
 
 def test_plan_validates_permissions_without_executing_actions():
@@ -182,7 +211,7 @@ def test_plan_validates_permissions_without_executing_actions():
             objective="Evaluate the supplied business assessment.",
         )
     ])
-    registry.validate_plan(safe_plan, granted_permissions={"assessment:read"})
+    registry.validate_plan(safe_plan, principal=make_principal(), resource_tenant_id="tenant_alpha", now_epoch=150)
     assert [item.capability_id for item in registry.list_capabilities()] == ["assessment.evaluate"]
 
 
@@ -348,7 +377,7 @@ def test_plan_validation_checks_required_fields_and_types():
         )
     ])
     with pytest.raises(CapabilityPayloadValidationError, match="does not match"):
-        registry.validate_plan(missing_required, granted_permissions={"assessment:read"})
+        registry.validate_plan(missing_required, principal=make_principal(), resource_tenant_id="tenant_alpha", now_epoch=150)
 
     wrong_type = plan([
         PlanStep(
@@ -359,7 +388,7 @@ def test_plan_validation_checks_required_fields_and_types():
         )
     ])
     with pytest.raises(CapabilityPayloadValidationError, match="does not match"):
-        registry.validate_plan(wrong_type, granted_permissions={"assessment:read"})
+        registry.validate_plan(wrong_type, principal=make_principal(), resource_tenant_id="tenant_alpha", now_epoch=150)
 
 
 def test_plan_validation_rejects_unexpected_input_properties():
@@ -374,7 +403,7 @@ def test_plan_validation_rejects_unexpected_input_properties():
         )
     ])
     with pytest.raises(CapabilityPayloadValidationError):
-        registry.validate_plan(unsafe, granted_permissions={"assessment:read"})
+        registry.validate_plan(unsafe, principal=make_principal(), resource_tenant_id="tenant_alpha", now_epoch=150)
 
 
 def test_input_and_output_validation_require_capability_permissions():
@@ -389,7 +418,9 @@ def test_input_and_output_validation_require_capability_permissions():
         registry.validate_input(
             "assessment.evaluate",
             {"query": "valid query"},
-            granted_permissions=set(),
+            principal=make_principal(permissions=frozenset()),
+            resource_tenant_id="tenant_alpha",
+            now_epoch=150,
         )
     with pytest.raises(PermissionError):
         registry.validate_output(
@@ -400,7 +431,9 @@ def test_input_and_output_validation_require_capability_permissions():
     registry.validate_input(
         "assessment.evaluate",
         {"query": "valid query"},
-        granted_permissions={"assessment:read"},
+        principal=make_principal(),
+            resource_tenant_id="tenant_alpha",
+            now_epoch=150,
     )
     registry.validate_output(
         "assessment.evaluate",
