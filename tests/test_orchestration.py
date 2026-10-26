@@ -1,5 +1,4 @@
-import sqlite3
-
+import hashlib\nimport sqlite3\n
 import pytest
 from pydantic import ValidationError
 
@@ -12,7 +11,7 @@ from cmx.kernel import (
     TaskRecord,
     TaskState,
 )
-from cmx.orchestration import ExecutionCoordinator, ExecutionContext
+from cmx.orchestration import ExecutionCoordinator, ExecutionContext, _capability_fingerprint, _stable_key
 from cmx.persistence import SQLiteTaskStore
 from cmx.security import AuthorizationError, PrincipalContext
 from cmx.workflow_store import (
@@ -575,3 +574,52 @@ def test_oversized_workflow_plan_is_rejected_before_task_creation(tmp_path):
     assert task_store.get_task(
         "task_001", principal=principal(), authorization_now_epoch=150
     ) is None
+
+
+def test_existing_idempotency_reservation_blocks_handler_dispatch(tmp_path):
+    calls = []
+
+    def transform(payload, dependencies, context: ExecutionContext):
+        calls.append(context.step_id)
+        return {"result": payload["value"] * 2}
+
+    _, workflow_store, registry, coordinator = stack(
+        tmp_path, handlers={"demo.transform": transform}
+    )
+    identity = principal()
+    plan = make_plan([step()])
+    submitted = submit(coordinator, plan, identity)
+    capability_spec = registry.get("demo.transform")
+    key = hashlib.sha256(
+        _stable_key(
+            identity.tenant_id, "task_001", plan.plan_id, "step_one",
+            capability_spec.version, {"value": 3},
+        ).encode("utf-8")
+    ).hexdigest()
+    request = {
+        "tenant_id": identity.tenant_id,
+        "task_id": "task_001",
+        "plan_id": plan.plan_id,
+        "plan_hash": submitted.plan_hash,
+        "step_id": "step_one",
+        "capability_id": capability_spec.capability_id,
+        "capability_version": capability_spec.version,
+        "capability_fingerprint": _capability_fingerprint(capability_spec),
+        "input_payload": {"value": 3},
+        "dependency_outputs": {},
+    }
+    coordinator.idempotency_store.reserve(
+        "task_001:step_one", key, request, principal=identity,
+        occurred_at=150, authorization_now_epoch=150,
+    )
+
+    outcome = coordinator.run_until_blocked(
+        "task_001", principal=identity, authorization_now_epoch=150,
+    )
+    final = workflow_store.get_workflow(
+        "task_001", principal=identity, authorization_now_epoch=151,
+    )
+    assert calls == []
+    assert final.steps[0].status == "interrupted"
+    assert outcome.workflow_state == "failed"
+    assert "replay was blocked" in outcome.message.lower()
