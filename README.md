@@ -27,7 +27,7 @@ The engine only evaluates supplied candidate records. It does **not** browse the
 
 The dependent draft pull-request series adds contracts for task lifecycle state, bounded retries, execution-plan dependency validation, a capability allowlist, human-approval requirements, completion verification, and JSON Schema validation for capability inputs and outputs.
 
-These are engineering contracts, not a functioning autonomous runtime. The kernel currently does not execute tools or external actions, authenticate a caller, persist task state, retrieve live vendor data or connect an LLM. Caller-supplied permission sets are not a production authorization system. The changes remain in draft pull requests and require review before merging.
+These are engineering contracts, not a functioning autonomous runtime. The kernel currently does not execute tools or external actions, authenticate a caller, persist task state, retrieve live vendor data or connect an LLM. The new authorization policy requires an internally supplied, upstream-verified principal context and fails closed on missing permissions, expired context and tenant mismatches; however, a real authentication/session verifier is not yet connected. Never construct this context from client-supplied JSON. The changes remain in draft pull requests and require review before merging.
 
 ## Quick start — Windows PowerShell
 
