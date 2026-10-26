@@ -2,7 +2,7 @@
 
 Roadmap items are proposals, not implemented capabilities. Progress is gated on tests, customer validation and security review.
 
-## Phase 0 — Decision core (current)
+## Phase 0 — Decision core
 
 - [x] Structured problem, requirement and candidate contracts
 - [x] Deterministic capability constraints
@@ -10,7 +10,7 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] First-year cost evaluation with cautious handling of unverified prices
 - [x] Explainable weighted requirement coverage
 - [x] FastAPI endpoints and automated tests
-- [ ] Run CI and dependency security checks in GitHub Actions
+- [ ] Add dependency security scanning and coverage thresholds to CI
 
 ## Phase 1 — Validation and persistence
 
@@ -22,11 +22,14 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Phase 2 — Core reasoning kernel
 
-- [ ] Explicit task state machine and bounded task lifecycle
-- [ ] Capability/tool registry with input/output schemas, permissions and timeouts
-- [ ] Plan representation with dependencies, checkpoints and retry limits
+- [x] Explicit task state machine and bounded task lifecycle contracts
+- [x] Capability registry with input/output schema metadata, permissions and timeouts
+- [x] Plan representation with dependency validation and retry limits
 - [ ] Independent verification contracts and testable completion criteria
-- [ ] Deterministic core remains usable without an LLM
+- [x] Deterministic core remains usable without an LLM
+- [ ] Bind permissions to authenticated identities and durable audit records
+- [ ] Validate payloads against declared JSON Schema and add an executor interface
+- [ ] Add persistent task storage and concurrency tests
 
 ## Phase 3 — Evidence retrieval and model adapters
 
@@ -57,3 +60,7 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [ ] Evaluate ML only when adequate task/outcome data exists
 - [ ] Benchmark specialist neural models only for validated use cases
 - [ ] Investigate quantum-inspired/quantum methods only against classical baselines
+
+## Current increment
+
+The task-state and capability-registry contracts are implemented in src/cmx/kernel.py. They validate state transitions, bounded retries, plan dependency graphs, capability allowlists and permission requirements. They do not execute tools, authenticate callers, validate arbitrary payloads against JSON Schema or persist task state. See docs/reasoning-kernel.md.
