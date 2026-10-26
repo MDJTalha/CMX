@@ -28,7 +28,8 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Independent verification contracts and testable completion criteria
 - [x] Deterministic core remains usable without an LLM
 - [ ] Bind permissions to authenticated identities and durable audit records
-- [ ] Validate payloads against declared JSON Schema and add an executor interface
+- [x] Validate capability schemas and plan inputs against bounded JSON Schema Draft 2020-12 contracts
+- [ ] Add a constrained executor interface
 - [ ] Add persistent task storage and concurrency tests
 
 ## Phase 3 — Evidence retrieval and model adapters
@@ -63,4 +64,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The task-state, capability-registry and fail-closed verification contracts are implemented in src/cmx/kernel.py. They validate state transitions, bounded retries, plan dependency graphs, capability allowlists, permission requirements and evidence-based completion status. They do not execute tools, authenticate callers, validate arbitrary payloads against JSON Schema or persist task state. See docs/reasoning-kernel.md.
+The task-state, capability-registry, bounded JSON Schema validation and fail-closed verification contracts are implemented on the current development branch in src/cmx/kernel.py and src/cmx/schema_validation.py. They validate state transitions, bounded retries, plan dependency graphs, capability allowlists, caller-provided permission requirements, plan input payloads and evidence-based completion status. They do not execute tools, authenticate callers or persist task state. See docs/reasoning-kernel.md.
