@@ -140,6 +140,38 @@ def test_stale_version_is_rejected_without_adding_audit_event(tmp_path):
     ).state == TaskState.PLANNED
 
 
+def test_concurrent_writers_cannot_both_apply_same_task_version(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    path = tmp_path / "cmx.sqlite3"
+    store_a = SQLiteTaskStore(path)
+    store_b = SQLiteTaskStore(path)
+    create(store_a)
+
+    def write(store):
+        try:
+            return store.apply_event(
+                "task_001",
+                TaskEvent.PLAN_ACCEPTED,
+                principal=principal(),
+                expected_version=0,
+                occurred_at=151,
+                authorization_now_epoch=150,
+            )
+        except StaleTaskVersionError:
+            return "stale"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(write, [store_a, store_b]))
+
+    assert sum(isinstance(result, TaskRecord) for result in results) == 1
+    assert results.count("stale") == 1
+    assert [item.sequence for item in audit(store_a)] == [0, 1]
+    assert store_a.verify_audit_chain(
+        "task_001", principal=principal(), authorization_now_epoch=150
+    )
+
+
 def test_duplicate_task_id_is_scoped_to_tenant(tmp_path):
     store = SQLiteTaskStore(tmp_path / "cmx.sqlite3")
     create(store)
