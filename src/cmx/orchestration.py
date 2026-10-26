@@ -76,7 +76,7 @@ class ExecutionOutcome(BaseModel):
 
 
 CapabilityHandler = Callable[
-    [dict[str, Any], dict[str, dict[str, Any]], ExecutionContext],
+    [dict[str, Any], dict[str, Any], ExecutionContext],
     Any,
 ]
 
@@ -431,10 +431,12 @@ class ExecutionCoordinator:
                 authorization_now_epoch=authorization_now_epoch,
             )
             capability = self.registry.get(step.capability_id)
+            # JSON round-trips isolate handler-owned values from the immutable plan/snapshot.
+            import json
+
             dependencies = {
-                dep_id: dict(step_by_id[dep_id].output_payload)
+                dep_id: json.loads(json.dumps(step_by_id[dep_id].output_payload, allow_nan=False))
                 for dep_id in spec.depends_on
-                if isinstance(step_by_id[dep_id].output_payload, dict)
             }
             idempotency_key = hashlib.sha256(
                 _stable_key(
@@ -458,7 +460,7 @@ class ExecutionCoordinator:
                 idempotency_key=idempotency_key,
             )
             try:
-                output = handler(dict(spec.input_payload), dependencies, context)
+                output = handler(json.loads(json.dumps(spec.input_payload, allow_nan=False)), dependencies, context)
             except TimeoutError:
                 self.workflow_store.fail_step(
                     task_id, step_id, error_code="handler_timeout",
