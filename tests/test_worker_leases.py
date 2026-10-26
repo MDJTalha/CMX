@@ -167,3 +167,71 @@ def test_step_transition_rejects_a_superseded_fencing_token(tmp_path):
         "task_001", principal=principal(), authorization_now_epoch=202,
     )
     assert unchanged.steps[0].status == "running"
+
+
+def test_active_lease_prevents_coordinator_from_interrupting_live_step(tmp_path):
+    task_store, workflow_store = ready_workflow(tmp_path)
+    leases = SQLiteWorkerLeaseStore(task_store)
+    lease = leases.claim(
+        "task_001", "step_one", worker_id="worker_live", lease_seconds=100,
+        principal=principal(), now_epoch=200, authorization_now_epoch=200,
+    )
+    workflow_store.start_step(
+        "task_001", "step_one", principal=principal(), occurred_at=201,
+        authorization_now_epoch=201, worker_id=lease.worker_id,
+        fencing_token=lease.fencing_token,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    coordinator = ExecutionCoordinator(
+        task_store=task_store, workflow_store=workflow_store, registry=registry,
+        handlers={"demo.transform": lambda payload, deps, ctx: {"result": payload["value"]}},
+    )
+    outcome = coordinator.run_until_blocked(
+        "task_001", principal=principal(), authorization_now_epoch=202,
+    )
+    current = workflow_store.get_workflow(
+        "task_001", principal=principal(), authorization_now_epoch=202,
+    )
+    assert outcome.status == "running"
+    assert "currently holds" in outcome.message
+    assert current.steps[0].status == "running"
+
+
+def test_coordinator_fences_normal_step_execution_and_releases_lease(tmp_path):
+    task_store, workflow_store = ready_workflow(tmp_path)
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    coordinator = ExecutionCoordinator(
+        task_store=task_store, workflow_store=workflow_store, registry=registry,
+        handlers={"demo.transform": lambda payload, deps, ctx: {"result": payload["value"] + 4}},
+    )
+    outcome = coordinator.run_until_blocked(
+        "task_001", principal=principal(), authorization_now_epoch=202,
+    )
+    current = workflow_store.get_workflow(
+        "task_001", principal=principal(), authorization_now_epoch=202,
+    )
+    assert outcome.status == "succeeded"
+    assert current.steps[0].status == "succeeded"
+    assert current.steps[0].output_payload == {"result": 7}
+    assert SQLiteWorkerLeaseStore(task_store).get_active(
+        "task_001", "step_one", principal=principal(), now_epoch=202,
+        authorization_now_epoch=202,
+    ) is None
