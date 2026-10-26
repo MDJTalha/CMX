@@ -148,4 +148,4 @@ def test_windows_termination_falls_back_when_taskkill_unavailable(monkeypatch):
 
     process.terminate.assert_called_once()
     process.wait.assert_any_call(timeout=0.1)
-    process.wait.assert_any_call(timeout=1)
+    process.kill.assert_not_called()
