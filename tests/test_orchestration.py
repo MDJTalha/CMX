@@ -241,7 +241,7 @@ def test_side_effect_step_waits_for_explicit_tenant_scoped_approval(tmp_path):
         tenant_id="tenant_beta",
         permissions=frozenset({"workflow:approve", "workflow:read"}),
     )
-    with pytest.raises(AuthorizationError) as captured:
+    with pytest.raises(WorkflowNotFoundError):
         coordinator.approve_step(
             "task_001",
             "step_one",
@@ -249,7 +249,6 @@ def test_side_effect_step_waits_for_explicit_tenant_scoped_approval(tmp_path):
             occurred_at=151,
             authorization_now_epoch=150,
         )
-    assert captured.value.code == "tenant_mismatch"
 
     reviewer = principal(
         subject_id="reviewer_002",
@@ -456,3 +455,41 @@ def test_duplicate_workflow_plan_id_is_rejected_in_same_tenant(tmp_path):
     submit(coordinator, make_plan([step()], plan_id="plan_001"))
     with pytest.raises(ValueError):
         submit(coordinator, make_plan([step()], plan_id="plan_001"))
+
+
+def test_capability_contract_drift_after_submission_is_rejected(tmp_path):
+    calls = []
+
+    def handler(payload, dependencies, context):
+        calls.append(context.step_id)
+        return {"result": payload["value"]}
+
+    task_store, workflow_store, _, coordinator = stack(
+        tmp_path, handlers={"demo.transform": handler}
+    )
+    submit(coordinator, make_plan([step()]))
+
+    changed_registry = CapabilityRegistry()
+    changed_registry.register(
+        capability(
+            version="1.0.1",
+            output_schema={
+                "type": "object",
+                "properties": {"result": {"type": "number"}, "extra": {"type": "string"}},
+                "required": ["result"],
+                "additionalProperties": False,
+            },
+        )
+    )
+    coordinator.registry = changed_registry
+
+    from cmx.workflow_store import WorkflowIntegrityError as PinError
+
+    with pytest.raises(PinError, match="changed since workflow submission"):
+        coordinator.run_until_blocked(
+            "task_001", principal=principal(), authorization_now_epoch=150
+        )
+    assert calls == []
+    assert task_store.get_task(
+        "task_001", principal=principal(), authorization_now_epoch=150
+    ).state == TaskState.CREATED
