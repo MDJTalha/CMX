@@ -494,3 +494,53 @@ def test_capability_contract_drift_after_submission_is_rejected(tmp_path):
     assert task_store.get_task(
         "task_001", principal=principal(), authorization_now_epoch=150
     ).state == TaskState.CREATED
+
+
+def test_capability_contract_drift_between_steps_stops_before_next_handler(tmp_path):
+    calls = []
+    holder = {}
+
+    def handler(payload, dependencies, context):
+        calls.append(context.step_id)
+        if context.step_id == "step_one":
+            holder["registry"].get("demo.transform").output_schema = {
+                "type": "object",
+                "properties": {
+                    "result": {"type": "number"},
+                    "extra": {"type": "string"},
+                },
+                "required": ["result"],
+                "additionalProperties": False,
+            }
+        return {"result": payload["value"]}
+
+    task_store, workflow_store, registry, coordinator = stack(
+        tmp_path, handlers={"demo.transform": handler}
+    )
+    holder["registry"] = registry
+    plan = make_plan(
+        [
+            step("step_one", value=1),
+            step("step_two", value=2, depends_on=["step_one"]),
+        ]
+    )
+    submit(coordinator, plan)
+
+    from cmx.workflow_store import WorkflowIntegrityError as PinError
+
+    with pytest.raises(PinError, match="changed since workflow submission"):
+        coordinator.run_until_blocked(
+            "task_001", principal=principal(), authorization_now_epoch=150
+        )
+
+    assert calls == ["step_one"]
+    snapshot = workflow_store.get_workflow(
+        "task_001", principal=principal(), authorization_now_epoch=150
+    )
+    assert {item.step_id: item.status for item in snapshot.steps} == {
+        "step_one": "succeeded",
+        "step_two": "pending",
+    }
+    assert task_store.get_task(
+        "task_001", principal=principal(), authorization_now_epoch=150
+    ).state == TaskState.RUNNING
