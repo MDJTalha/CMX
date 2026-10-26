@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -76,7 +77,82 @@ class SubprocessJSONHandler:
         self.last_stderr = b""
 
     @staticmethod
+    def _terminate_windows_tree(process: subprocess.Popen[bytes], grace: float) -> None:
+        """Terminate a Windows process tree with a bounded system utility call."""
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                shell=False,
+                timeout=max(1.0, min(3.0, grace + 1.0)),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        try:
+            process.wait(timeout=max(0.1, grace))
+            return
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        if process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=grace)
+        except (subprocess.TimeoutExpired, OSError):
+            try:
+                process.kill()
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=1)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+
+    @staticmethod
     def _terminate(process: subprocess.Popen[bytes], grace: float) -> None:
+        """Terminate the process group on POSIX, not just the immediate child.
+
+        On Windows, taskkill /T is used to terminate the process tree with a bounded
+        timeout, followed by a direct-child fallback. This is not a Job Object: it does
+        not enforce CPU/memory quotas or provide kill-on-close semantics.
+        """
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                if process.poll() is None:
+                    try:
+                        process.terminate()
+                    except OSError:
+                        pass
+            try:
+                process.wait(timeout=grace)
+            except (subprocess.TimeoutExpired, OSError):
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except OSError:
+                    if process.poll() is None:
+                        try:
+                            process.kill()
+                        except OSError:
+                            pass
+                try:
+                    process.wait(timeout=1)
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
+            return
+
+        if os.name == "nt":
+            SubprocessJSONHandler._terminate_windows_tree(process, grace)
+            return
+
         if process.poll() is not None:
             return
         try:
@@ -107,6 +183,8 @@ class SubprocessJSONHandler:
             process = subprocess.Popen(
                 self.argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 cwd=self.cwd, env=self.env, shell=False, close_fds=True,
+                start_new_session=(os.name == "posix"),
+                creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
             )
         except (OSError, ValueError) as exc:
             raise HandlerExecutionError("process_start_failed") from exc

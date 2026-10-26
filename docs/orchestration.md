@@ -52,3 +52,8 @@ This increment does not implement automatic step retries. Per-step attempt limit
 - The success criteria confirm task/step completion and schema conformance; they do not independently prove a real-world business outcome.
 - Recovery stops on an uncertain in-flight step rather than retrying automatically.
 - Production data-retention, backup/restore, secrets handling, monitoring, and isolation of untrusted handlers remain separate release requirements.
+
+
+## Subprocess adapter platform limits
+
+The opt-in `SubprocessJSONHandler` starts POSIX children in a new session and terminates the process group on timeout or output overflow. On Windows, cleanup invokes `taskkill /PID <pid> /T /F` with shell execution disabled and a bounded command timeout, then falls back to direct-child termination if the utility is unavailable. Regression tests cover the command arguments, timeout bound, and fallback. This improves descendant cleanup but is not equivalent to a Windows Job Object: it does not enforce CPU/memory quotas, kill-on-close guarantees, filesystem/network isolation, or a security sandbox. Production resource isolation remains open.

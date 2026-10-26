@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 
@@ -39,6 +40,26 @@ def test_subprocess_timeout_terminates_child_and_marks_unknown_outcome():
         adapter({}, {}, context(timeout=1))
     assert error.value.code == "deadline_exceeded_outcome_unknown"
     assert time.monotonic() - started < 3
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group termination is platform-specific")
+def test_subprocess_timeout_terminates_descendant_processes(tmp_path):
+    marker = tmp_path / "descendant-survived"
+    child = (
+        "import time; time.sleep(1.5); "
+        + "open(" + repr(str(marker)) + ", 'w').write('alive')"
+    )
+    script = (
+        "import subprocess,sys,time; "
+        + "subprocess.Popen([sys.executable, '-c', " + repr(child) + "]); "
+        + "time.sleep(5)"
+    )
+    adapter = handler(script, termination_grace_seconds=0.05)
+    with pytest.raises(HandlerExecutionError) as error:
+        adapter({}, {}, context(timeout=1))
+    assert error.value.code == "deadline_exceeded_outcome_unknown"
+    time.sleep(1.7)
+    assert not marker.exists()
 
 
 def test_subprocess_output_limit_terminates_child():
@@ -86,3 +107,45 @@ def test_subprocess_env_is_explicit_and_does_not_inherit_secrets():
 def test_subprocess_invalid_environment_is_rejected():
     with pytest.raises(ValueError):
         SubprocessJSONHandler([sys.executable], env={"BAD=NAME": "value"})
+
+
+
+def test_windows_termination_uses_bounded_taskkill_tree(monkeypatch):
+    from unittest.mock import Mock
+
+    import cmx.execution as execution
+
+    process = Mock()
+    process.pid = 4242
+    process.poll.return_value = None
+    process.wait.return_value = 0
+    run = Mock(return_value=Mock(returncode=0))
+    monkeypatch.setattr(execution.subprocess, "run", run)
+
+    SubprocessJSONHandler._terminate_windows_tree(process, 0.25)
+
+    run.assert_called_once()
+    args, kwargs = run.call_args
+    assert args[0] == ["taskkill", "/PID", "4242", "/T", "/F"]
+    assert kwargs["shell"] is False
+    assert kwargs["timeout"] == 1.25
+    process.wait.assert_called_once_with(timeout=0.25)
+
+
+def test_windows_termination_falls_back_when_taskkill_unavailable(monkeypatch):
+    from unittest.mock import Mock
+
+    import cmx.execution as execution
+
+    process = Mock()
+    process.pid = 4243
+    process.poll.return_value = None
+    process.wait.side_effect = [OSError("wait failed"), 0]
+    run = Mock(side_effect=FileNotFoundError("taskkill missing"))
+    monkeypatch.setattr(execution.subprocess, "run", run)
+
+    SubprocessJSONHandler._terminate_windows_tree(process, 0.1)
+
+    process.terminate.assert_called_once()
+    process.wait.assert_any_call(timeout=0.1)
+    process.kill.assert_not_called()
