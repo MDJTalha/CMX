@@ -547,7 +547,18 @@ def test_capability_contract_drift_between_steps_stops_before_next_handler(tmp_p
 
 
 def test_oversized_workflow_plan_is_rejected_before_task_creation(tmp_path):
-    task_store, _, _, coordinator = stack(tmp_path)
+    large_capability = capability(
+        input_schema={
+            "type": "object",
+            "properties": {
+                "value": {"type": "number"},
+                "note": {"type": "string"},
+            },
+            "required": ["value", "note"],
+            "additionalProperties": False,
+        }
+    )
+    task_store, _, _, coordinator = stack(tmp_path, specs=[large_capability])
     large_text = "x" * 200_000
     steps = [
         PlanStep(
