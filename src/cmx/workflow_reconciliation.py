@@ -44,6 +44,9 @@ class SQLiteWorkflowReconciler:
         if len(notes.strip()) > 2000:
             raise ValueError("notes must not exceed 2000 characters.")
         timestamp = _timestamp(occurred_at)
+        # Lease safety must use the trusted current authorization clock, not a caller-supplied
+        # historical audit timestamp. Otherwise a stale timestamp could bypass a live lease.
+        lease_check_epoch = _timestamp(authorization_now_epoch)
         with self.task_store._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -65,7 +68,7 @@ class SQLiteWorkflowReconciler:
                        WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
                     (identity.tenant_id, task_id, step_id),
                 ).fetchone()
-                if lease is not None and lease["expires_at"] > timestamp:
+                if lease is not None and lease["expires_at"] > lease_check_epoch:
                     raise WorkflowConflictError("A live worker lease exists; reconciliation review is blocked.")
                 self.workflow_store._record_step_event(
                     connection, tenant_id=identity.tenant_id, task_id=task_id,
