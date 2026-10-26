@@ -19,6 +19,7 @@ from cmx.workflow_store import (
     StepApprovalRequired,
     SQLiteWorkflowStore,
     WorkflowIntegrityError,
+    WorkflowNotFoundError,
 )
 
 
