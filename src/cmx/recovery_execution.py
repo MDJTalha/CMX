@@ -83,20 +83,26 @@ class RecoveryExecutionPreflight:
             )
         if observation.provider_id != expected_provider_id:
             raise RecoveryPreflightError("Provider identity does not match the configured adapter.")
-        consumed = self.authorization_store.consume(
-            authorization_token,
-            operation_id=record.operation_id,
-            idempotency_key=record.idempotency_key,
-            request_hash=record.request_hash,
-            evidence_ref=observation.evidence_ref,
-            principal=principal,
-            now_epoch=now_epoch,
-        )
+        try:
+            consumed, claimed_record = self.authorization_store.consume_and_claim_recovery(
+                authorization_token,
+                operation_id=record.operation_id,
+                idempotency_key=record.idempotency_key,
+                request_hash=record.request_hash,
+                evidence_ref=observation.evidence_ref,
+                principal=principal,
+                now_epoch=now_epoch,
+            )
+        except Exception as exc:
+            from cmx.retry_authorization import RetryAuthorizationError
+            if isinstance(exc, RetryAuthorizationError):
+                raise RecoveryPreflightError(str(exc)) from exc
+            raise
         return RecoveryPreflightResult(
-            operation_id=record.operation_id,
-            tenant_id=record.tenant_id,
-            idempotency_key=record.idempotency_key,
-            request_hash=record.request_hash,
+            operation_id=claimed_record.operation_id,
+            tenant_id=claimed_record.tenant_id,
+            idempotency_key=claimed_record.idempotency_key,
+            request_hash=claimed_record.request_hash,
             provider_id=expected_provider_id,
             evidence_ref=observation.evidence_ref,
             decision=decision,
