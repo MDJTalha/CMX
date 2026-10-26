@@ -107,3 +107,60 @@ def test_subprocess_env_is_explicit_and_does_not_inherit_secrets():
 def test_subprocess_invalid_environment_is_rejected():
     with pytest.raises(ValueError):
         SubprocessJSONHandler([sys.executable], env={"BAD=NAME": "value"})
+
+
+def test_windows_tree_cleanup_uses_bounded_taskkill(monkeypatch):
+    calls = []
+    class FakeProcess:
+        pid = 4321
+        returncode = None
+        def poll(self):
+            return None
+        def wait(self, timeout=None):
+            calls.append(("wait", timeout))
+            self.returncode = 0
+            return 0
+        def terminate(self):
+            calls.append(("terminate",))
+        def kill(self):
+            calls.append(("kill",))
+
+    process = FakeProcess()
+    def fake_run(argv, **kwargs):
+        calls.append(("run", argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    SubprocessJSONHandler._terminate_windows_tree(process, 0.25)
+
+    run_call = next(item for item in calls if item[0] == "run")
+    assert run_call[1] == ["taskkill", "/PID", "4321", "/T", "/F"]
+    assert run_call[2]["shell"] is False
+    assert run_call[2]["timeout"] <= 5
+    assert ("wait", 0.25) in calls
+    assert not any(item[0] in {"terminate", "kill"} for item in calls)
+
+
+def test_windows_tree_cleanup_falls_back_when_taskkill_is_unavailable(monkeypatch):
+    calls = []
+    class FakeProcess:
+        pid = 4322
+        def poll(self):
+            return None
+        def wait(self, timeout=None):
+            calls.append(("wait", timeout))
+            if len([item for item in calls if item[0] == "wait"]) == 1:
+                raise subprocess.TimeoutExpired("taskkill", timeout)
+            return 0
+        def terminate(self):
+            calls.append(("terminate",))
+        def kill(self):
+            calls.append(("kill",))
+    def unavailable(*args, **kwargs):
+        raise FileNotFoundError("taskkill unavailable")
+    monkeypatch.setattr(subprocess, "run", unavailable)
+
+    SubprocessJSONHandler._terminate_windows_tree(FakeProcess(), 0.01)
+
+    assert ("terminate",) in calls
+    assert len([item for item in calls if item[0] == "wait"]) >= 2
