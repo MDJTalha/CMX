@@ -120,10 +120,9 @@ def test_windows_termination_uses_bounded_taskkill_tree(monkeypatch):
     process.poll.return_value = None
     process.wait.return_value = 0
     run = Mock(return_value=Mock(returncode=0))
-    monkeypatch.setattr(execution.os, "name", "nt")
     monkeypatch.setattr(execution.subprocess, "run", run)
 
-    SubprocessJSONHandler._terminate(process, 0.25)
+    SubprocessJSONHandler._terminate_windows_tree(process, 0.25)
 
     run.assert_called_once()
     args, kwargs = run.call_args
@@ -143,10 +142,9 @@ def test_windows_termination_falls_back_when_taskkill_unavailable(monkeypatch):
     process.poll.return_value = None
     process.wait.side_effect = [OSError("wait failed"), 0]
     run = Mock(side_effect=FileNotFoundError("taskkill missing"))
-    monkeypatch.setattr(execution.os, "name", "nt")
     monkeypatch.setattr(execution.subprocess, "run", run)
 
-    SubprocessJSONHandler._terminate(process, 0.1)
+    SubprocessJSONHandler._terminate_windows_tree(process, 0.1)
 
     process.terminate.assert_called_once()
     process.wait.assert_any_call(timeout=0.1)
