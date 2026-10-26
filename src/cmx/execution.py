@@ -77,6 +77,41 @@ class SubprocessJSONHandler:
         self.last_stderr = b""
 
     @staticmethod
+    def _terminate_windows_tree(process: subprocess.Popen[bytes], grace: float) -> None:
+        """Terminate a Windows process tree with a bounded system utility call."""
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                shell=False,
+                timeout=max(1.0, min(3.0, grace + 1.0)),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        try:
+            process.wait(timeout=max(0.1, grace))
+            return
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        if process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=grace)
+        except (subprocess.TimeoutExpired, OSError):
+            try:
+                process.kill()
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=1)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+
+    @staticmethod
     def _terminate(process: subprocess.Popen[bytes], grace: float) -> None:
         """Terminate the process group on POSIX, not just the immediate child.
 
@@ -115,26 +150,8 @@ class SubprocessJSONHandler:
             return
 
         if os.name == "nt":
-            # taskkill /T asks Windows to terminate the complete descendant tree.
-            # It is invoked without a shell and with a hard timeout; if unavailable,
-            # fall back to direct-child termination rather than hanging the worker.
-            try:
-                subprocess.run(
-                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    shell=False,
-                    timeout=max(1.0, min(3.0, grace + 1.0)),
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-            try:
-                process.wait(timeout=max(0.1, grace))
-                return
-            except (subprocess.TimeoutExpired, OSError):
-                pass
+            SubprocessJSONHandler._terminate_windows_tree(process, grace)
+            return
 
         if process.poll() is not None:
             return
