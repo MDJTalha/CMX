@@ -7,9 +7,9 @@ from __future__ import annotations
 import hmac
 from typing import Any, Literal
 
-from cmx.kernel import CapabilityRegistry, ExecutionPlan
+from cmx.kernel import CapabilityRegistry, ExecutionPlan, TaskEvent, TaskState
 from cmx.schema_validation import validate_json_payload
-from cmx.persistence import _timestamp, _validate_identifier
+from cmx.persistence import AuditIntegrityError, SQLiteTaskStore, _timestamp, _validate_identifier
 from cmx.security import PrincipalContext
 from cmx.workflow_store import SQLiteWorkflowStore, WorkflowConflictError, WorkflowIntegrityError, WorkflowNotFoundError, _approval_fingerprint, _canonical_json
 
@@ -23,6 +23,48 @@ class SQLiteWorkflowReconciler:
         self.workflow_store = workflow_store
         self.task_store = workflow_store.task_store
 
+
+    def _mark_task_failed_in_transaction(
+        self, connection: Any, *, tenant_id: str, task_id: str,
+        actor_id: str, occurred_at: int,
+    ) -> TaskState:
+        """Atomically align task lifecycle with a terminal failed workflow."""
+        row = connection.execute(
+            """SELECT task_id, state, version, attempts, max_attempts, last_event
+               FROM cmx_tasks WHERE tenant_id = ? AND task_id = ?""",
+            (tenant_id, task_id),
+        ).fetchone()
+        if row is None:
+            raise WorkflowIntegrityError("Workflow exists without its corresponding task record.")
+        audit_rows = SQLiteTaskStore._audit_rows(connection, tenant_id, task_id)
+        if not SQLiteTaskStore._verify_rows(audit_rows) or not SQLiteTaskStore._latest_matches_task(row, audit_rows):
+            raise AuditIntegrityError("Task record does not match its audit history.")
+        current = SQLiteTaskStore._task_from_row(row)
+        if current.state == TaskState.FAILED:
+            return current.state
+        if current.state != TaskState.RUNNING:
+            raise WorkflowConflictError("Reconciliation resolution requires the task to be running or already failed.")
+        updated = current.apply(TaskEvent.ERROR, expected_version=current.version)
+        cursor = connection.execute(
+            """UPDATE cmx_tasks SET state = ?, version = ?, attempts = ?, max_attempts = ?,
+               last_event = ?, updated_at = ? WHERE tenant_id = ? AND task_id = ? AND version = ?""",
+            (updated.state.value, updated.version, updated.attempts, updated.max_attempts,
+             updated.last_event.value if updated.last_event is not None else None,
+             occurred_at, tenant_id, task_id, current.version),
+        )
+        if cursor.rowcount != 1:
+            raise WorkflowConflictError("Task version changed during reconciliation resolution.")
+        SQLiteTaskStore._append_audit_event(
+            connection, tenant_id=tenant_id, task_id=task_id, sequence=updated.version,
+            event_type=TaskEvent.ERROR.value, occurred_at=occurred_at, actor_id=actor_id,
+            payload={
+                "state": updated.state.value, "version": updated.version,
+                "previous_version": current.version, "attempts": updated.attempts,
+                "max_attempts": updated.max_attempts, "previous_state": current.state.value,
+                "last_event": updated.last_event.value if updated.last_event is not None else None,
+            },
+        )
+        return updated.state
 
     def inspect_uncertain_steps(
         self,
@@ -197,8 +239,8 @@ class SQLiteWorkflowReconciler:
     ) -> dict[str, object]:
         """Atomically resolve an interrupted step as failed after a review confirms no effect.
 
-        This terminal resolution never retries or invokes the handler. The workflow remains
-        failed; step state and the corresponding hash-chained audit event commit together.
+        This terminal resolution never retries or invokes the handler. The workflow and task remain
+        failed; step state and both hash-chained audit records commit together.
         """
         identity = self.workflow_store._authorize(
             principal,
@@ -268,6 +310,10 @@ class SQLiteWorkflowReconciler:
                         "automatic_replay": False,
                     },
                 )
+                task_state = self._mark_task_failed_in_transaction(
+                    connection, tenant_id=identity.tenant_id, task_id=task_id,
+                    actor_id=identity.subject_id, occurred_at=timestamp,
+                )
                 final = connection.execute(
                     """SELECT * FROM cmx_workflow_steps
                        WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
@@ -283,6 +329,7 @@ class SQLiteWorkflowReconciler:
             "step_id": step_id,
             "status": resolved.status,
             "workflow_state": "failed",
+            "task_state": task_state.value,
             "resolution": "effect_not_applied",
             "committed": True,
             "automatic_replay": False,
@@ -302,8 +349,8 @@ class SQLiteWorkflowReconciler:
     ) -> dict[str, object]:
         """Atomically record an externally confirmed success without resuming the workflow.
 
-        The interrupted step and its output are committed with the audit event in one
-        transaction. The workflow/task remain failed and no handler is invoked: this
+        The interrupted step, output, workflow audit event, task failure transition and task audit event
+        are committed in one transaction. No handler is invoked: this
         resolves the uncertain step's outcome but does not resume downstream execution.
         """
         identity = self.workflow_store._authorize(
@@ -430,6 +477,7 @@ class SQLiteWorkflowReconciler:
             "step_id": step_id,
             "status": resolved.status,
             "workflow_state": "failed",
+            "task_state": task_state.value,
             "resolution": "effect_confirmed",
             "committed": True,
             "automatic_replay": False,
