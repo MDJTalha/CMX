@@ -81,6 +81,20 @@ CapabilityHandler = Callable[
 ]
 
 
+def _capability_fingerprint(spec: Any) -> str:
+    """Pin every policy and schema field, not only a human-entered version string."""
+    import json
+
+    encoded = json.dumps(
+        spec.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 class ExecutionCoordinator:
     """Run a stored plan step-by-step under task, tenant, permission and approval gates."""
 
@@ -202,9 +216,14 @@ class ExecutionCoordinator:
             resource_tenant_id=principal.tenant_id,
             now_epoch=authorization_now_epoch,
         )
-        versions = {
-            capability_id: self.registry.get(capability_id).version
+        capability_specs = {
+            capability_id: self.registry.get(capability_id)
             for capability_id in {step.capability_id for step in plan.steps}
+        }
+        versions = {capability_id: spec.version for capability_id, spec in capability_specs.items()}
+        fingerprints = {
+            capability_id: _capability_fingerprint(spec)
+            for capability_id, spec in capability_specs.items()
         }
         task = TaskRecord(task_id=task_id, max_attempts=max_task_attempts)
         return self.workflow_store.create_workflow(
@@ -212,6 +231,7 @@ class ExecutionCoordinator:
             plan,
             principal=principal,
             capability_versions=versions,
+            capability_fingerprints=fingerprints,
             occurred_at=self._clock(authorization_now_epoch, occurred_at),
             authorization_now_epoch=authorization_now_epoch,
         )
@@ -252,6 +272,7 @@ class ExecutionCoordinator:
             resource_tenant_id=identity.tenant_id,
             now_epoch=authorization_now_epoch,
         )
+        self._validate_capability_pins(snapshot)
 
         if snapshot.task.state in {TaskState.SUCCEEDED, TaskState.FAILED, TaskState.CANCELLED}:
             desired = {
@@ -499,6 +520,19 @@ class ExecutionCoordinator:
             )
 
         return self._finish_success(task_id, identity, authorization_now_epoch)
+
+    def _validate_capability_pins(self, snapshot: WorkflowSnapshot) -> None:
+        for step in snapshot.steps:
+            current = self.registry.get(step.capability_id)
+            current_fingerprint = _capability_fingerprint(current)
+            if (
+                current.version != step.capability_version
+                or current_fingerprint != step.capability_fingerprint
+            ):
+                raise WorkflowIntegrityError(
+                    f"Capability '{step.capability_id}' changed since workflow submission; "
+                    "create a new workflow instead of executing against a different contract."
+                )
 
     def _reconcile_start(
         self,
