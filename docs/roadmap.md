@@ -31,7 +31,7 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [ ] Connect a real authentication/session verifier and persist identity-bound audit records
 - [x] Validate capability schemas and plan inputs against bounded JSON Schema Draft 2020-12 contracts
 - [ ] Add a constrained executor interface
-- [ ] Add persistent task storage and concurrency tests
+- [x] Add file-backed SQLite task persistence, optimistic version checks and transactional audit append tests
 
 ## Phase 3 — Evidence retrieval and model adapters
 
@@ -65,4 +65,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The current development branch contains task-state and capability-registry contracts, bounded JSON Schema validation, fail-closed tenant-scoped authorization policy, and fail-closed verification contracts in src/cmx/kernel.py, src/cmx/schema_validation.py and src/cmx/security.py. These contracts validate state transitions, bounded retries, plan dependency graphs, capability allowlists, plan input payloads, required permissions, tenant boundaries and expiry of an internally supplied PrincipalContext. They do not verify real credentials, execute tools or persist task state. See docs/reasoning-kernel.md and docs/authorization-model.md.
+The current development branch contains task-state and capability-registry contracts, bounded JSON Schema validation, fail-closed tenant-scoped authorization policy, verification contracts, and a file-backed SQLite task/audit reference store. The store atomically persists transitions and hash-chained audit events, scopes reads by tenant, and tests version conflicts and audit integrity. It does not verify real credentials or execute tools, and SQLite is not yet a production multi-node backend. See docs/reasoning-kernel.md, docs/authorization-model.md and docs/task-persistence.md.
