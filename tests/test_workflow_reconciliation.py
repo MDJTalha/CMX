@@ -636,3 +636,94 @@ def test_retry_authorization_audit_failure_rolls_back_record(tmp_path, monkeypat
         "task_retry_auth", principal=identity, authorization_now_epoch=212,
     )
     assert not any(event.event_type == "step.retry_authorization_recorded" for event in events)
+
+
+
+def test_retry_authorization_consumption_is_single_use_and_never_starts_retry(tmp_path):
+    _, store, identity, registry, reconciler = _retry_authorization_fixture(tmp_path)
+    authorization = reconciler.record_retry_authorization(
+        "task_retry_auth", "step_retry_auth", registry=registry,
+        principal=identity, occurred_at=211, authorization_now_epoch=211,
+    )
+    consumed = reconciler.consume_retry_authorization(
+        "task_retry_auth", "step_retry_auth", authorization["authorization_id"],
+        registry=registry, principal=identity, occurred_at=212, authorization_now_epoch=212,
+    )
+    assert consumed["authorization_consumed"] is True
+    assert consumed["retry_started"] is False
+    assert consumed["automatic_replay"] is False
+    events = store.list_workflow_events(
+        "task_retry_auth", principal=identity, authorization_now_epoch=212,
+    )
+    event = events[-1]
+    assert event.event_type == "step.retry_authorization_consumed"
+    assert event.payload["details"]["authorization_id"] == authorization["authorization_id"]
+    assert event.payload["details"]["retry_started"] is False
+    workflow = store.get_workflow(
+        "task_retry_auth", principal=identity, authorization_now_epoch=212,
+    )
+    assert workflow.steps[0].status == "interrupted"
+    assert workflow.steps[0].attempts == 1
+
+
+def test_retry_authorization_cannot_be_consumed_twice(tmp_path):
+    _, _, identity, registry, reconciler = _retry_authorization_fixture(tmp_path)
+    authorization = reconciler.record_retry_authorization(
+        "task_retry_auth", "step_retry_auth", registry=registry,
+        principal=identity, occurred_at=211, authorization_now_epoch=211,
+    )
+    reconciler.consume_retry_authorization(
+        "task_retry_auth", "step_retry_auth", authorization["authorization_id"],
+        registry=registry, principal=identity, occurred_at=212, authorization_now_epoch=212,
+    )
+    with pytest.raises(WorkflowConflictError, match="already been consumed"):
+        reconciler.consume_retry_authorization(
+            "task_retry_auth", "step_retry_auth", authorization["authorization_id"],
+            registry=registry, principal=identity, occurred_at=213, authorization_now_epoch=213,
+        )
+
+
+def test_retry_authorization_cannot_be_consumed_after_review_changes(tmp_path):
+    _, _, identity, registry, reconciler = _retry_authorization_fixture(tmp_path)
+    authorization = reconciler.record_retry_authorization(
+        "task_retry_auth", "step_retry_auth", registry=registry,
+        principal=identity, occurred_at=211, authorization_now_epoch=211,
+    )
+    reconciler.record_review(
+        "task_retry_auth", "step_retry_auth", decision="inconclusive",
+        evidence_reference="provider:review-changed",
+        notes="New evidence makes the prior decision inconclusive.",
+        principal=identity, occurred_at=212, authorization_now_epoch=212,
+    )
+    with pytest.raises(WorkflowConflictError, match="review changed"):
+        reconciler.consume_retry_authorization(
+            "task_retry_auth", "step_retry_auth", authorization["authorization_id"],
+            registry=registry, principal=identity, occurred_at=213, authorization_now_epoch=213,
+        )
+
+
+def test_retry_authorization_consumption_rolls_back_when_audit_write_fails(tmp_path, monkeypatch):
+    _, store, identity, registry, reconciler = _retry_authorization_fixture(tmp_path)
+    authorization = reconciler.record_retry_authorization(
+        "task_retry_auth", "step_retry_auth", registry=registry,
+        principal=identity, occurred_at=211, authorization_now_epoch=211,
+    )
+
+    def fail_audit(*args, **kwargs):
+        raise RuntimeError("simulated consumption audit failure")
+
+    monkeypatch.setattr(store, "_record_step_event", fail_audit)
+    with pytest.raises(RuntimeError, match="simulated consumption audit failure"):
+        reconciler.consume_retry_authorization(
+            "task_retry_auth", "step_retry_auth", authorization["authorization_id"],
+            registry=registry, principal=identity, occurred_at=212, authorization_now_epoch=212,
+        )
+    monkeypatch.undo()
+    events = store.list_workflow_events(
+        "task_retry_auth", principal=identity, authorization_now_epoch=213,
+    )
+    assert not any(
+        event.event_type == "step.retry_authorization_consumed"
+        and event.payload.get("details", {}).get("authorization_id") == authorization["authorization_id"]
+        for event in events
+    )
