@@ -1,4 +1,6 @@
-import hashlib\nimport sqlite3\n
+import hashlib
+import sqlite3
+
 import pytest
 from pydantic import ValidationError
 
