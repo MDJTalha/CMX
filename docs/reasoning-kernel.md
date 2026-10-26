@@ -42,7 +42,7 @@ The registry is an explicit allowlist. Unknown and disabled capabilities fail cl
 
 ## Security boundaries and limitations
 
-- Capability input/output schemas are metadata in this increment; payloads are not yet validated against JSON Schema and no executor is invoked.
+- Input and output payloads can now be checked against declared JSON Schemas, including plan-step inputs before execution. This still does not invoke an executor or prove that a real-world side effect occurred.
 - A permission set passed by a caller is not authentication. Production must derive permissions from a trusted identity and authorization service.
 - Human approval is represented as a required workflow condition, not a UI, cryptographic approval record or notification system.
 - No LLM, web retrieval, ML model, neural network, quantum-computing service, database, authentication provider or external action is connected.
@@ -54,4 +54,4 @@ Automated tests cover legal and illegal state transitions, stale versions, termi
 
 Verification contracts are now included. Each contract must define at least one mandatory criterion; duplicate or unexpected results are rejected. A failed mandatory criterion yields failed verification, while missing/unknown mandatory evidence yields blocked verification. Only passing every mandatory criterion yields a passed result. This is a deterministic contract evaluator, not an independent external verifier: evidence quality still depends on the trusted caller.
 
-Future increments should add payload validation against JSON Schema, a persistent audit log, identity-bound permissions, cancellation semantics for in-flight work, and integration tests before enabling any real executor.
+Future increments should add trusted identity-bound permissions, persistent task storage and audit records, cancellation semantics for in-flight work, an executor interface with timeout/idempotency boundaries, and end-to-end integration tests before enabling any real executor.
