@@ -501,3 +501,66 @@ def test_atomic_success_resolution_rejects_invalid_output_without_mutation(tmp_p
     assert after.steps[0].status == before.steps[0].status == "interrupted"
     assert after.workflow_state == before.workflow_state == "failed"
     assert len(after_events) == len(before_events)
+
+def test_success_resolution_rolls_back_task_and_workflow_when_task_audit_fails(tmp_path, monkeypatch):
+    from cmx.persistence import SQLiteTaskStore
+
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="provider:atomic-task-audit-failure",
+        notes="Provider confirms the operation completed.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    before = store.get_workflow("task_001", principal=identity, authorization_now_epoch=211)
+    before_workflow_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=211,
+    )
+    before_task = store.task_store.get_task(
+        "task_001", principal=identity, authorization_now_epoch=211,
+    )
+    before_task_events = store.task_store.list_audit_events(
+        "task_001", principal=identity, authorization_now_epoch=211,
+    )
+
+    def fail_task_audit(cls, connection, **kwargs):
+        raise RuntimeError("simulated task audit append failure")
+
+    monkeypatch.setattr(SQLiteTaskStore, "_append_audit_event", classmethod(fail_task_audit))
+    with pytest.raises(RuntimeError, match="simulated task audit append failure"):
+        reconciler.resolve_confirmed_success(
+            "task_001", "step_one", output_payload={"result": 42},
+            registry=registry, principal=identity, occurred_at=212, authorization_now_epoch=212,
+        )
+
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    after_workflow_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    after_task = store.task_store.get_task(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    after_task_events = store.task_store.list_audit_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    assert after.steps[0].status == before.steps[0].status == "interrupted"
+    assert after.steps[0].output_payload is None
+    assert after.workflow_state == before.workflow_state == "failed"
+    assert after.task.state == before_task.state
+    assert after_task.state == before_task.state
+    assert len(after_workflow_events) == len(before_workflow_events)
+    assert len(after_task_events) == len(before_task_events)
+    assert store.task_store.verify_audit_chain(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    ) is True
