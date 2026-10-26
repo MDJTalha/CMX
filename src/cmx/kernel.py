@@ -12,7 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from cmx.schema_validation import validate_json_payload, validate_json_schema
-from cmx.security import AuthorizationError, PrincipalContext, authorize_permissions
+from cmx.security import PrincipalContext, authorize_permissions
 
 
 class TaskState(StrEnum):
