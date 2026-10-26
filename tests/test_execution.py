@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 
@@ -39,6 +40,26 @@ def test_subprocess_timeout_terminates_child_and_marks_unknown_outcome():
         adapter({}, {}, context(timeout=1))
     assert error.value.code == "deadline_exceeded_outcome_unknown"
     assert time.monotonic() - started < 3
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group termination is platform-specific")
+def test_subprocess_timeout_terminates_descendant_processes(tmp_path):
+    marker = tmp_path / "descendant-survived"
+    child = (
+        "import time; time.sleep(1.5); "
+        + "open(" + repr(str(marker)) + ", 'w').write('alive')"
+    )
+    script = (
+        "import subprocess,sys,time; "
+        + "subprocess.Popen([sys.executable, '-c', " + repr(child) + "]); "
+        + "time.sleep(5)"
+    )
+    adapter = handler(script, termination_grace_seconds=0.05)
+    with pytest.raises(HandlerExecutionError) as error:
+        adapter({}, {}, context(timeout=1))
+    assert error.value.code == "deadline_exceeded_outcome_unknown"
+    time.sleep(1.7)
+    assert not marker.exists()
 
 
 def test_subprocess_output_limit_terminates_child():
