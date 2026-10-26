@@ -8,13 +8,13 @@ This is a controlled execution primitive, not a general autonomous agent, distri
 
 ## Execution lifecycle
 
-1. **Submit:** validate the plan DAG, all referenced capabilities, permissions and step input schemas. Pin each capability's semantic version and a SHA-256 fingerprint of its complete declared contract. Persist the task, immutable plan, pending step records, task-creation audit event and workflow-creation audit event.
+1. **Submit:** validate the plan DAG, all referenced capabilities, permissions and step input schemas. Pin each capability's semantic version and a SHA-256 fingerprint of its complete declared contract. The serialized plan is capped at 1 MiB. Persist the task, immutable plan, pending step records, task-creation audit event and workflow-creation audit event.
 2. **Start:** move the task through its explicit lifecycle and traverse steps in stable topological order.
 3. **Dependencies:** a step runs only after every dependency has a persisted `succeeded` status. Dependency outputs are passed to the handler as data, keyed by step ID.
 4. **Approval:** steps marked for approval pause before a handler is invoked. The reviewer must have the `workflow:approve` permission in the same tenant. The approval is bound to the immutable plan hash, step inputs, capability version and full capability-contract fingerprint.
 5. **Execute:** only a handler explicitly injected by trusted application code for the exact capability ID can run. There is no dynamic import, tool discovery or arbitrary model-generated executable code.
 6. **Validate output:** a handler result must satisfy the capability's declared output JSON Schema before it is stored as successful.
-7. **Persist:** each step status/result change and workflow state change appends a hash-chained audit event in the same SQLite transaction as that change.
+7. **Persist:** each step status/result change and workflow state change appends a hash-chained audit event in the same SQLite transaction as that change. Capability pins are rechecked before each handler invocation so a mid-run contract change stops downstream work.
 8. **Complete:** once every step has a schema-valid output, the task enters the verification state and evaluates mandatory step-completion criteria before it can be marked succeeded.
 
 ## Handler contract
