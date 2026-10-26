@@ -219,7 +219,7 @@ class ApprovedEvidenceStore:
     def __init__(self, database_path: str | Path) -> None:
         self.database_path = str(database_path)
         Path(self.database_path).parent.mkdir(parents=True, exist_ok=True)
-        with self._connection() as connection
+        with self._connection() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("""CREATE TABLE IF NOT EXISTS approved_evidence (
                 document_id TEXT NOT NULL,
