@@ -434,8 +434,8 @@ def test_input_and_output_validation_require_capability_permissions():
         "assessment.evaluate",
         {"query": "valid query"},
         principal=make_principal(),
-            resource_tenant_id="tenant_alpha",
-            now_epoch=150,
+        resource_tenant_id="tenant_alpha",
+        now_epoch=150,
     )
     registry.validate_output(
         "assessment.evaluate",
