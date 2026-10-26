@@ -167,6 +167,7 @@ class ExecutionCoordinator:
         self.workflow_store = workflow_store
         self.registry = registry
         self.worker_leases = SQLiteWorkerLeaseStore(task_store)
+        self.idempotency_store = SQLiteIdempotencyStore(task_store)
         self.worker_id = f"coordinator-{uuid4().hex}"
         self.handlers: dict[str, CapabilityHandler] = {}
         for capability_id, handler in (handlers or {}).items():
