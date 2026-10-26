@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -77,6 +78,42 @@ class SubprocessJSONHandler:
 
     @staticmethod
     def _terminate(process: subprocess.Popen[bytes], grace: float) -> None:
+        """Terminate the process group on POSIX, not just the immediate child.
+
+        On Windows, this fallback terminates the direct child only. Production Windows
+        workers must run inside a Job Object configured with kill-on-close and resource
+        limits; stdlib Popen does not provide a safe portable Job Object API.
+        """
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                if process.poll() is None:
+                    try:
+                        process.terminate()
+                    except OSError:
+                        pass
+            try:
+                process.wait(timeout=grace)
+            except (subprocess.TimeoutExpired, OSError):
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except OSError:
+                    if process.poll() is None:
+                        try:
+                            process.kill()
+                        except OSError:
+                            pass
+                try:
+                    process.wait(timeout=1)
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
+            return
+
         if process.poll() is not None:
             return
         try:
@@ -107,6 +144,8 @@ class SubprocessJSONHandler:
             process = subprocess.Popen(
                 self.argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 cwd=self.cwd, env=self.env, shell=False, close_fds=True,
+                start_new_session=(os.name == "posix"),
+                creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
             )
         except (OSError, ValueError) as exc:
             raise HandlerExecutionError("process_start_failed") from exc
