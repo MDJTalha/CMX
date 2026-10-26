@@ -493,3 +493,115 @@ def test_atomic_success_resolution_rejects_invalid_output_without_mutation(tmp_p
     assert after.steps[0].status == before.steps[0].status == "interrupted"
     assert after.workflow_state == before.workflow_state == "failed"
     assert len(after_events) == len(before_events)
+
+def _success_registry():
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    return registry
+
+
+def test_atomic_success_resolution_requires_latest_effect_confirmed_review(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="provider:success-first",
+        notes="First review confirms the effect.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    reconciler.record_review(
+        "task_001", "step_one", decision="inconclusive",
+        evidence_reference="incident:success-reopened",
+        notes="Later review reopens uncertainty.",
+        principal=identity, occurred_at=211, authorization_now_epoch=211,
+    )
+    before = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    before_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    with pytest.raises(WorkflowConflictError, match="latest reconciliation review"):
+        reconciler.resolve_confirmed_success(
+            "task_001", "step_one", output_payload={"result": 42},
+            registry=_success_registry(), principal=identity,
+            occurred_at=212, authorization_now_epoch=212,
+        )
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    after_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    assert before.steps[0].status == after.steps[0].status == "interrupted"
+    assert len(after_events) == len(before_events)
+
+
+def test_atomic_success_resolution_blocks_live_lease_without_mutation(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="provider:success-live-lease",
+        notes="Provider confirms the effect.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    with store.task_store._connection() as connection:
+        connection.execute(
+            "UPDATE cmx_worker_leases SET expires_at = 300 "
+            "WHERE tenant_id = ? AND task_id = ? AND step_id = ?",
+            (identity.tenant_id, "task_001", "step_one"),
+        )
+    before_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=211,
+    )
+    with pytest.raises(WorkflowConflictError, match="live worker lease"):
+        reconciler.resolve_confirmed_success(
+            "task_001", "step_one", output_payload={"result": 42},
+            registry=_success_registry(), principal=identity,
+            occurred_at=400, authorization_now_epoch=212,
+        )
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    after_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    assert after.steps[0].status == "interrupted"
+    assert after.workflow_state == "failed"
+    assert len(after_events) == len(before_events)
+
+
+def test_atomic_success_resolution_rolls_back_when_audit_append_fails(tmp_path, monkeypatch):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="provider:success-audit-rollback",
+        notes="Provider confirms the effect.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    before = store.get_workflow("task_001", principal=identity, authorization_now_epoch=211)
+    before_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=211,
+    )
+
+    def fail_audit_append(*args, **kwargs):
+        raise RuntimeError("simulated success audit append failure")
+
+    monkeypatch.setattr(store, "_record_step_event", fail_audit_append)
+    with pytest.raises(RuntimeError, match="simulated success audit append failure"):
+        reconciler.resolve_confirmed_success(
+            "task_001", "step_one", output_payload={"result": 42},
+            registry=_success_registry(), principal=identity,
+            occurred_at=212, authorization_now_epoch=212,
+        )
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    after_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    assert before.steps[0].status == after.steps[0].status == "interrupted"
+    assert after.steps[0].output_payload is None
+    assert len(after_events) == len(before_events)
