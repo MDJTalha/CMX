@@ -217,19 +217,70 @@ class SQLiteWorkflowScheduler:
                 connection.execute("ROLLBACK")
                 raise
         job = self._job(claimed)
+        use_wall_clock = now_epoch is None
+        heartbeat_stop = threading.Event()
+        heartbeat_lost = threading.Event()
+        heartbeat_thread = None
+        if use_wall_clock:
+            heartbeat_thread = threading.Thread(
+                target=self._renew_loop,
+                args=(job, worker_id, lease_seconds, heartbeat_stop, heartbeat_lost),
+                name=f"cmx-lease-{job.job_id[:8]}",
+                daemon=True,
+            )
+            heartbeat_thread.start()
         try:
             outcome = coordinator.run_until_blocked(
                 job.task_id, principal=identity, authorization_now_epoch=now, max_steps=max_steps,
             )
+            finish_now = int(time.time()) if use_wall_clock else now
+            if heartbeat_lost.is_set():
+                raise SchedulerConflict("Worker lease renewal failed; stale worker result is not committed.")
             if outcome.status == "succeeded":
-                return self._finish(job, identity, worker_id, "succeeded", None, now, outcome)
+                return self._finish(job, identity, worker_id, "succeeded", None, finish_now, outcome)
             if outcome.status in {"failed", "cancelled"}:
-                return self._finish(job, identity, worker_id, "failed", "workflow_terminal_failure", now, outcome)
+                return self._finish(job, identity, worker_id, "failed", "workflow_terminal_failure", finish_now, outcome)
             if outcome.status == "awaiting_approval":
-                return self._finish(job, identity, worker_id, "blocked", "approval_required", now, outcome)
-            return self._requeue(job, identity, worker_id, now, outcome)
+                return self._finish(job, identity, worker_id, "blocked", "approval_required", finish_now, outcome)
+            return self._requeue(job, identity, worker_id, finish_now, outcome)
+        except SchedulerConflict:
+            raise
         except Exception:
-            return self._retry_or_fail(job, identity, worker_id, now, max_attempts)
+            finish_now = int(time.time()) if use_wall_clock else now
+            return self._retry_or_fail(job, identity, worker_id, finish_now, max_attempts)
+        finally:
+            heartbeat_stop.set()
+            if heartbeat_thread is not None:
+                heartbeat_thread.join(timeout=max(1.0, lease_seconds / 2))
+
+    def _renew_loop(
+        self, job: ScheduledJob, worker_id: str, lease_seconds: int,
+        stop: threading.Event, lost: threading.Event,
+    ) -> None:
+        interval = max(0.1, min(10.0, lease_seconds / 3))
+        while not stop.wait(interval):
+            now = int(time.time())
+            try:
+                with self.task_store._connection() as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    try:
+                        updated = connection.execute(
+                            """UPDATE cmx_scheduler_jobs SET lease_until=?, updated_at=?
+                               WHERE tenant_id=? AND job_id=? AND status='running'
+                                 AND lease_owner=? AND fencing_token=? AND lease_until>?""",
+                            (now + lease_seconds, now, job.tenant_id, job.job_id,
+                             worker_id, job.fencing_token, now),
+                        )
+                        connection.execute("COMMIT")
+                    except Exception:
+                        connection.execute("ROLLBACK")
+                        raise
+                if updated.rowcount != 1:
+                    lost.set()
+                    return
+            except Exception:
+                lost.set()
+                return
 
     def _finish(
         self, job: ScheduledJob, principal: PrincipalContext, worker_id: str,
