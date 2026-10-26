@@ -107,3 +107,47 @@ def test_subprocess_env_is_explicit_and_does_not_inherit_secrets():
 def test_subprocess_invalid_environment_is_rejected():
     with pytest.raises(ValueError):
         SubprocessJSONHandler([sys.executable], env={"BAD=NAME": "value"})
+
+
+
+def test_windows_termination_uses_bounded_taskkill_tree(monkeypatch):
+    from unittest.mock import Mock
+
+    import cmx.execution as execution
+
+    process = Mock()
+    process.pid = 4242
+    process.poll.return_value = None
+    process.wait.return_value = 0
+    run = Mock(return_value=Mock(returncode=0))
+    monkeypatch.setattr(execution.os, "name", "nt")
+    monkeypatch.setattr(execution.subprocess, "run", run)
+
+    SubprocessJSONHandler._terminate(process, 0.25)
+
+    run.assert_called_once()
+    args, kwargs = run.call_args
+    assert args[0] == ["taskkill", "/PID", "4242", "/T", "/F"]
+    assert kwargs["shell"] is False
+    assert kwargs["timeout"] == 1.25
+    process.wait.assert_called_once_with(timeout=0.25)
+
+
+def test_windows_termination_falls_back_when_taskkill_unavailable(monkeypatch):
+    from unittest.mock import Mock
+
+    import cmx.execution as execution
+
+    process = Mock()
+    process.pid = 4243
+    process.poll.return_value = None
+    process.wait.side_effect = [OSError("wait failed"), 0]
+    run = Mock(side_effect=FileNotFoundError("taskkill missing"))
+    monkeypatch.setattr(execution.os, "name", "nt")
+    monkeypatch.setattr(execution.subprocess, "run", run)
+
+    SubprocessJSONHandler._terminate(process, 0.1)
+
+    process.terminate.assert_called_once()
+    process.wait.assert_any_call(timeout=0.1)
+    process.wait.assert_any_call(timeout=1)
