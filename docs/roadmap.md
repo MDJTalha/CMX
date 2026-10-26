@@ -29,7 +29,7 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Deterministic core remains usable without an LLM
 - [x] Add fail-closed tenant-scoped authorization policy against an internally supplied principal context
 - [x] Verify server-issued service bearer credentials against hashed server-side records, including expiry and one-way revocation for assessment evaluation
-- [ ] Integrate human identity through OIDC or equivalent and implement browser sessions/MFA where needed
+- [ ] Complete human identity integration and browser sessions/MFA where needed (an optional RS256 OIDC bearer verifier, server-controlled tenant membership/permissions, optional MFA-claim enforcement, API auth-mode selection and local grant/revoke commands are implemented; browser sessions, CSRF protection, login/logout, MFA enrollment and full provider conformance review remain open)
 - [x] Validate capability schemas and plan inputs against bounded JSON Schema Draft 2020-12 contracts
 - [x] Add a controlled coordinator for explicitly injected capability handlers and topologically ordered plans
 - [x] Persist immutable workflow plans, step states/results, approvals and hash-chained workflow audit events
@@ -88,3 +88,5 @@ The coordinator has bounded execution and explicit worker lease fencing. Recover
 - A durable single-node scheduler now persists tenant-scoped jobs, claims them transactionally with fencing tokens, delegates execution to the coordinator, and uses bounded retries for scheduler exceptions. This does not provide distributed queue guarantees or exactly-once external effects.
 
 - Scheduler workers in wall-clock mode now renew their queue lease while the coordinator runs and refuse result commits after heartbeat loss; deterministic explicit-time tests do not start a real-time heartbeat.
+
+- Optional OIDC API authentication now verifies RS256 issuer/audience/JWKS/time claims and derives tenant permissions only from the local membership store; service-key mode remains the default. This is not a browser-session implementation or production OIDC certification.
