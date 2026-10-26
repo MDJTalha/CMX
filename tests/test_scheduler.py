@@ -168,3 +168,25 @@ def test_failed_or_blocked_job_requires_operator_intervention_before_requeue(tmp
         )
     with pytest.raises(SchedulerConflict, match="operator review"):
         scheduler.enqueue("task_sched_01", principal=actor, now_epoch=201)
+
+
+def test_wall_clock_scheduler_preserves_coordinator_live_clock(tmp_path):
+    _, _, coordinator, scheduler = setup(tmp_path)
+    actor = principal()
+    scheduler.enqueue("task_sched_01", principal=actor)
+    observed = []
+    original = coordinator.run_until_blocked
+
+    def capture_clock(task_id, **kwargs):
+        observed.append(kwargs.get("authorization_now_epoch"))
+        return original(task_id, **kwargs)
+
+    coordinator.run_until_blocked = capture_clock
+    result = scheduler.run_once(
+        coordinator, worker_id="wall_clock_worker", principal=actor, lease_seconds=30,
+    )
+    assert result.status == "succeeded"
+    # None is intentional: it tells the coordinator to use wall-clock time and
+    # run its own worker-lease heartbeat instead of freezing time at claim.
+    assert observed == [None]
+
