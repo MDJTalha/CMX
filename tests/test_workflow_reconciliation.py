@@ -14,13 +14,13 @@ def reviewer():
     })
 
 
-def interrupted_store(tmp_path):
+def interrupted_store(tmp_path, *, lease_seconds=5):
     task_store, store = ready_workflow(tmp_path)
     identity = reviewer()
     leases = SQLiteWorkerLeaseStore(task_store)
     lease = leases.claim(
         "task_001", "step_one", worker_id="worker_recovered",
-        lease_seconds=5, principal=identity, now_epoch=200, authorization_now_epoch=200,
+        lease_seconds=lease_seconds, principal=identity, now_epoch=200, authorization_now_epoch=200,
     )
     store.start_step(
         "task_001", "step_one", principal=identity, occurred_at=201,
@@ -88,4 +88,15 @@ def test_reconciliation_rejects_non_interrupted_step(tmp_path):
             "task_001", "step_one", decision="inconclusive",
             evidence_reference="ticket:CMX-2", notes="Not interrupted.",
             principal=identity, occurred_at=210, authorization_now_epoch=210,
+        )
+
+
+
+def test_future_audit_timestamp_cannot_bypass_live_lease(tmp_path):
+    store, identity = interrupted_store(tmp_path, lease_seconds=100)
+    with pytest.raises(WorkflowConflictError, match="live worker lease"):
+        SQLiteWorkflowReconciler(store).record_review(
+            "task_001", "step_one", decision="inconclusive",
+            evidence_reference="ticket:CMX-3", notes="Attempted with a future audit timestamp.",
+            principal=identity, occurred_at=400, authorization_now_epoch=210,
         )
