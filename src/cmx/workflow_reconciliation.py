@@ -777,6 +777,175 @@ class SQLiteWorkflowReconciler:
             "review_event_id": latest_review[0],
         }
 
+    def consume_retry_authorization(
+        self,
+        task_id: str,
+        step_id: str,
+        authorization_id: str,
+        *,
+        registry: CapabilityRegistry,
+        principal: PrincipalContext,
+        occurred_at: int | None = None,
+        authorization_now_epoch: int | None = None,
+    ) -> dict[str, object]:
+        """Atomically consume one authorization record without starting a retry.
+
+        Consumption is single-use and fails closed if the review, workflow, step,
+        lease, attempt budget, dependencies, capability contract, or approval is stale.
+        This method intentionally never resets a step or invokes a handler.
+        """
+        identity = self.workflow_store._authorize(
+            principal,
+            {"workflow:reconcile", "workflow:execute", "workflow:read", "tasks:read", "audit:read"},
+            authorization_now_epoch,
+        )
+        _validate_identifier(task_id, "task_id")
+        _validate_identifier(step_id, "step_id")
+        if not isinstance(authorization_id, str) or not authorization_id.strip() or len(authorization_id) > 64:
+            raise ValueError("authorization_id must be a non-empty identifier of at most 64 characters.")
+        timestamp = _timestamp(occurred_at)
+        now_epoch = _timestamp(authorization_now_epoch)
+
+        with self.task_store._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self.workflow_store._assert_workflow_integrity(connection, identity.tenant_id, task_id)
+                plan_row = self.workflow_store._plan_row(connection, identity.tenant_id, task_id)
+                if plan_row is None:
+                    raise WorkflowNotFoundError("Workflow was not found in the active tenant.")
+                if plan_row["state"] != "failed":
+                    raise WorkflowConflictError("Retry authorization consumption requires a failed workflow.")
+                row = connection.execute(
+                    """SELECT * FROM cmx_workflow_steps
+                       WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
+                    (identity.tenant_id, task_id, step_id),
+                ).fetchone()
+                if row is None:
+                    raise WorkflowNotFoundError("Workflow step was not found in the active tenant.")
+                if row["status"] != "interrupted":
+                    raise WorkflowConflictError("Only an interrupted step can consume retry authorization.")
+                if row["attempts"] >= row["max_attempts"]:
+                    raise WorkflowConflictError("Step retry limit has been reached.")
+                lease = connection.execute(
+                    """SELECT expires_at FROM cmx_worker_leases
+                       WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
+                    (identity.tenant_id, task_id, step_id),
+                ).fetchone()
+                if lease is not None and lease["expires_at"] > now_epoch:
+                    raise WorkflowConflictError("A live worker lease exists; authorization consumption is blocked.")
+
+                events = self.workflow_store._event_rows(connection, identity.tenant_id, task_id)
+                authorization = None
+                latest_review = None
+                already_consumed = False
+                for event in events:
+                    payload = self.workflow_store._decode_event_payload(event)
+                    if payload.get("step_id") != step_id:
+                        continue
+                    details = payload.get("details")
+                    if event["event_type"] == "step.reconciliation_recorded" and isinstance(details, dict):
+                        latest_review = (event["event_id"], details)
+                    elif event["event_type"] == "step.retry_authorization_recorded" and isinstance(details, dict):
+                        if details.get("authorization_id") == authorization_id:
+                            authorization = (event["event_id"], details)
+                    elif event["event_type"] == "step.retry_authorization_consumed" and isinstance(details, dict):
+                        if details.get("authorization_id") == authorization_id:
+                            already_consumed = True
+
+                if authorization is None:
+                    raise WorkflowNotFoundError("Retry authorization was not found in the active tenant and step.")
+                if already_consumed:
+                    raise WorkflowConflictError("Retry authorization has already been consumed.")
+                auth_details = authorization[1]
+                if (
+                    auth_details.get("decision") != "effect_not_applied"
+                    or auth_details.get("plan_hash") != plan_row["plan_hash"]
+                    or auth_details.get("capability_id") != row["capability_id"]
+                    or auth_details.get("capability_version") != row["capability_version"]
+                    or auth_details.get("capability_fingerprint") != row["capability_fingerprint"]
+                    or auth_details.get("attempts") != row["attempts"]
+                    or auth_details.get("max_attempts") != row["max_attempts"]
+                ):
+                    raise WorkflowConflictError("Retry authorization no longer matches the current workflow evidence.")
+                if (
+                    latest_review is None
+                    or latest_review[1].get("decision") != "effect_not_applied"
+                    or latest_review[0] != auth_details.get("review_event_id")
+                ):
+                    raise WorkflowConflictError("The latest reconciliation review changed; fresh authorization is required.")
+
+                plan = ExecutionPlan.model_validate_json(plan_row["plan_json"])
+                spec = next((item for item in plan.steps if item.step_id == step_id), None)
+                if spec is None:
+                    raise WorkflowIntegrityError("Step is absent from the stored immutable plan.")
+                statuses = {
+                    item["step_id"]: item["status"]
+                    for item in connection.execute(
+                        "SELECT step_id, status FROM cmx_workflow_steps WHERE tenant_id = ? AND task_id = ?",
+                        (identity.tenant_id, task_id),
+                    ).fetchall()
+                }
+                if any(statuses.get(dep) != "succeeded" for dep in spec.depends_on):
+                    raise WorkflowConflictError("Retry authorization consumption requires every dependency to have succeeded.")
+
+                capability = registry.get(row["capability_id"])
+                from cmx.orchestration import _capability_fingerprint
+                if (
+                    capability.version != row["capability_version"]
+                    or _capability_fingerprint(capability) != row["capability_fingerprint"]
+                ):
+                    raise WorkflowConflictError("The capability contract changed; fresh retry authorization is required.")
+                if row["requires_approval"]:
+                    expected = _approval_fingerprint(
+                        tenant_id=identity.tenant_id,
+                        task_id=task_id,
+                        plan_hash=plan_row["plan_hash"],
+                        step=spec,
+                        capability_version=row["capability_version"],
+                        capability_fingerprint=row["capability_fingerprint"],
+                    )
+                    recorded = row["approval_fingerprint"]
+                    if (
+                        row["approved_by"] is None or row["approved_at"] is None
+                        or recorded is None or not hmac.compare_digest(recorded, expected)
+                    ):
+                        raise WorkflowConflictError("Retry authorization consumption requires valid input-bound approval.")
+
+                self.workflow_store._record_step_event(
+                    connection,
+                    tenant_id=identity.tenant_id,
+                    task_id=task_id,
+                    actor_id=identity.subject_id,
+                    occurred_at=timestamp,
+                    event_type="step.retry_authorization_consumed",
+                    workflow_state="failed",
+                    step_id=step_id,
+                    extra_payload={
+                        "authorization_id": authorization_id,
+                        "authorization_event_id": authorization[0],
+                        "review_event_id": latest_review[0],
+                        "attempts": row["attempts"],
+                        "max_attempts": row["max_attempts"],
+                        "retry_started": False,
+                        "automatic_replay": False,
+                    },
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
+
+        return {
+            "task_id": task_id,
+            "step_id": step_id,
+            "authorization_id": authorization_id,
+            "authorization_consumed": True,
+            "retry_started": False,
+            "automatic_replay": False,
+            "attempts": row["attempts"],
+            "max_attempts": row["max_attempts"],
+        }
+
     def record_review(
         self, task_id: str, step_id: str, *,
         decision: ReconciliationDecision, evidence_reference: str, notes: str,
