@@ -25,7 +25,7 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Explicit task state machine and bounded task lifecycle contracts
 - [x] Capability registry with input/output schema metadata, permissions and timeouts
 - [x] Plan representation with dependency validation and retry limits
-- [ ] Independent verification contracts and testable completion criteria
+- [x] Independent verification contracts and testable completion criteria
 - [x] Deterministic core remains usable without an LLM
 - [ ] Bind permissions to authenticated identities and durable audit records
 - [ ] Validate payloads against declared JSON Schema and add an executor interface
@@ -63,4 +63,4 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Current increment
 
-The task-state and capability-registry contracts are implemented in src/cmx/kernel.py. They validate state transitions, bounded retries, plan dependency graphs, capability allowlists and permission requirements. They do not execute tools, authenticate callers, validate arbitrary payloads against JSON Schema or persist task state. See docs/reasoning-kernel.md.
+The task-state, capability-registry and fail-closed verification contracts are implemented in src/cmx/kernel.py. They validate state transitions, bounded retries, plan dependency graphs, capability allowlists, permission requirements and evidence-based completion status. They do not execute tools, authenticate callers, validate arbitrary payloads against JSON Schema or persist task state. See docs/reasoning-kernel.md.
