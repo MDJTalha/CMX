@@ -249,6 +249,20 @@ class SQLiteRetryAuthorizationStore:
                 if (row["operation_id"] != operation_id or row["idempotency_key"] != idempotency_key
                         or row["request_hash"] != request_hash or row["evidence_ref"] != evidence_ref):
                     raise RetryAuthorizationError("Recovery authorization binding does not match this operation and evidence.")
+                # Revalidate the operation in the same transaction that consumes the ticket.
+                # An approval issued while the operation was uncertain must not remain usable
+                # after another actor resolves it or changes its durable binding.
+                durable = connection.execute(
+                    """SELECT operation_id, request_hash, state FROM cmx_idempotency_operations
+                       WHERE tenant_id=? AND idempotency_key=?""",
+                    (executor.tenant_id, idempotency_key),
+                ).fetchone()
+                if (durable is None or durable["operation_id"] != operation_id
+                        or durable["request_hash"] != request_hash
+                        or durable["state"] not in {"dispatching", "uncertain"}):
+                    raise RetryAuthorizationError(
+                        "The durable operation changed or is no longer eligible for recovery."
+                    )
                 updated = connection.execute(
                     """UPDATE cmx_retry_authorizations SET consumed_at=?, executor_id=?
                        WHERE authorization_id=? AND consumed_at IS NULL AND expires_at>?""",
