@@ -18,16 +18,18 @@ Start with a specific SME back-office workflow decision. The first target niche 
 - Conservative handling of unverified prices and regional availability.
 - Explainable weighted requirement-coverage score. This is **not** a probability of success.
 - FastAPI endpoints for health, metadata and decision evaluation.
-- Automated engine/API tests and a GitHub Actions test workflow.
-- Windows PowerShell scripts for local startup and testing.
+- Server-derived permission enforcement and bearer service-key verification for the assessment evaluation endpoint.
+- Server-side credential expiry/revocation, digest-only secret storage and a hash-chained credential issue/revoke ledger.
+- Operator CLI to issue or revoke service credentials; no public credential-administration endpoint.
+- Automated decision, API, credential, workflow and persistence tests, plus GitHub Actions CI.
 
-The engine only evaluates supplied candidate records. It does **not** browse the web, independently verify sources, retrieve live prices, call an LLM, train ML models, execute business actions, persist assessments or run advertisements.
+The deterministic decision engine only evaluates candidate records supplied in the request. It does **not** browse the web, independently verify sources, retrieve live prices, call an LLM, train ML models, execute business actions, persist assessments or run advertisements.
 
 ## Reasoning kernel status — under active development
 
-The dependent draft pull-request series now includes validated decision contracts, a task lifecycle kernel, bounded JSON Schema validation, tenant-scoped authorization policy, durable SQLite task/audit records, persisted workflow plans and step results, approval gates, and a controlled coordinator that runs explicitly injected handlers in dependency order.
+The dependent draft pull-request series includes validated decision contracts, a task lifecycle kernel, bounded JSON Schema validation, tenant-scoped authorization policy, durable SQLite task/audit records, persisted workflow plans and step results, approval gates, and a controlled coordinator that runs explicitly injected handlers in dependency order. The assessment HTTP route now requires a server-issued bearer service credential with the assessment:write permission.
 
-This remains an engineering foundation, not a production autonomous business platform. No real authentication/session verifier, credential revocation service, live vendor retrieval, LLM provider or external integration adapter is connected. Never construct PrincipalContext from client-supplied JSON. Handler deadlines are passed as budgets but are not forcibly enforced by the coordinator; side-effect uncertainty after interruption stops automatic replay. SQLite is a single-node reference backend. All changes remain in draft pull requests and require review before merging.
+This remains an engineering foundation, not a production autonomous business platform. Service-key authentication does not provide OIDC, human login, MFA, a browser session, rate limiting, managed secrets, production-scale persistence or resource-level tenant enforcement for future stored assessments. No live vendor retrieval, LLM provider or external integration adapter is connected. Never construct PrincipalContext from client-supplied JSON. Handler deadlines are passed as budgets but are not forcibly enforced by the coordinator; side-effect uncertainty after interruption stops automatic replay. SQLite is a single-node reference backend. All changes remain in draft pull requests and require review before merging.
 
 ## Quick start — Windows PowerShell
 
@@ -42,6 +44,16 @@ Open:
 - Interactive API documentation: http://127.0.0.1:8000/docs
 - Health check: http://127.0.0.1:8000/health
 
+The health and metadata endpoints are public. Evaluation requests require a bearer service credential. The first setup creates an empty local credential database at data/cmx-auth.sqlite3 when the protected route is used. Install the project and issue a key from a trusted local operator terminal:
+
+    python -m pip install -e ".[dev]"
+    $env:CMX_AUTH_DB_PATH = ".\data\cmx-auth.sqlite3"
+    python -m cmx.auth_cli issue --subject-id svc_assessments --tenant-id tenant_alpha --permission assessment:write --expires-in-days 30
+
+The credential CLI prints the bearer token once. Store it securely. Do not paste the token into source code, GitHub issues or logs. The .gitignore excludes the local SQLite database files. To revoke a key, use the credential ID reported by the CLI:
+
+    python -m cmx.auth_cli revoke --credential-id cred_REPLACE_WITH_32_HEX_CHARACTERS
+
 To run the tests in a separate PowerShell session:
 
     .\scripts\test.ps1
@@ -52,7 +64,7 @@ If local PowerShell policy blocks running the script, use a process-scoped polic
 
 - GET /health
 - GET /api/v1
-- POST /api/v1/assessments/evaluate
+- POST /api/v1/assessments/evaluate — requires a server-issued bearer credential with assessment:write
 
 The evaluation endpoint accepts a problem statement, desired outcome, target region, optional first-year budget, weighted requirements and candidate records. It returns candidate eligibility, documented requirement coverage, known failures, unknowns, budget/region status and warnings.
 

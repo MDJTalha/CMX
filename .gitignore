@@ -14,3 +14,6 @@ build/
 .idea/
 .vscode/
 .DS_Store
+data/*.sqlite3
+data/*.sqlite3-wal
+data/*.sqlite3-shm
