@@ -501,3 +501,138 @@ def test_atomic_success_resolution_rejects_invalid_output_without_mutation(tmp_p
     assert after.steps[0].status == before.steps[0].status == "interrupted"
     assert after.workflow_state == before.workflow_state == "failed"
     assert len(after_events) == len(before_events)
+
+
+
+def _retry_authorization_fixture(tmp_path):
+    from cmx.orchestration import ExecutionCoordinator
+    from cmx.kernel import ExecutionPlan, PlanStep
+    from cmx.persistence import SQLiteTaskStore
+    from cmx.workflow_store import SQLiteWorkflowStore
+
+    task_store = SQLiteTaskStore(tmp_path / "retry-authorization.sqlite3")
+    store = SQLiteWorkflowStore(task_store)
+    identity = reviewer()
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled retry authorization test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=1,
+    ))
+    coordinator = ExecutionCoordinator(
+        task_store=task_store, workflow_store=store, registry=registry, handlers={},
+    )
+    plan = ExecutionPlan(
+        plan_id="plan_retry_auth", objective="Test durable retry authorization.",
+        steps=[PlanStep(
+            step_id="step_retry_auth", capability_id="demo.transform",
+            objective="Exercise an interrupted operation without replay.",
+            input_payload={"value": 3}, max_attempts=2,
+        )],
+    )
+    coordinator.submit(
+        "task_retry_auth", plan, principal=identity,
+        occurred_at=150, authorization_now_epoch=150,
+    )
+    lease = SQLiteWorkerLeaseStore(task_store).claim(
+        "task_retry_auth", "step_retry_auth", worker_id="worker_retry_auth",
+        lease_seconds=5, principal=identity, now_epoch=200, authorization_now_epoch=200,
+    )
+    store.start_step(
+        "task_retry_auth", "step_retry_auth", principal=identity,
+        occurred_at=201, authorization_now_epoch=201,
+        worker_id=lease.worker_id, fencing_token=lease.fencing_token,
+    )
+    store.interrupt_step(
+        "task_retry_auth", "step_retry_auth", principal=identity,
+        occurred_at=206, authorization_now_epoch=206,
+    )
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_retry_auth", "step_retry_auth", decision="effect_not_applied",
+        evidence_reference="provider:lookup-retry-auth",
+        notes="Independent provider lookup confirms the operation was not applied.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    return task_store, store, identity, registry, reconciler
+
+
+def test_retry_authorization_is_durable_audited_and_does_not_start_retry(tmp_path):
+    task_store, store, identity, registry, reconciler = _retry_authorization_fixture(tmp_path)
+    before = store.get_workflow(
+        "task_retry_auth", principal=identity, authorization_now_epoch=211,
+    )
+    result = reconciler.record_retry_authorization(
+        "task_retry_auth", "step_retry_auth", registry=registry,
+        principal=identity, occurred_at=211, authorization_now_epoch=211,
+    )
+    after = store.get_workflow(
+        "task_retry_auth", principal=identity, authorization_now_epoch=211,
+    )
+    events = store.list_workflow_events(
+        "task_retry_auth", principal=identity, authorization_now_epoch=211,
+    )
+    event = events[-1]
+    assert result["authorization_recorded"] is True
+    assert result["authorization_id"]
+    assert result["retry_started"] is False
+    assert result["automatic_replay"] is False
+    assert result["single_use_enforced"] is False
+    assert event.event_type == "step.retry_authorization_recorded"
+    assert event.payload["authorization_id"] == result["authorization_id"]
+    assert event.payload["review_event_id"] == result["review_event_id"]
+    assert event.payload["automatic_replay"] is False
+    assert event.payload["retry_started"] is False
+    assert before.steps[0].status == after.steps[0].status == "interrupted"
+    assert before.steps[0].attempts == after.steps[0].attempts == 1
+
+
+def test_retry_authorization_rejects_duplicate_record_for_same_step(tmp_path):
+    _, store, identity, registry, reconciler = _retry_authorization_fixture(tmp_path)
+    reconciler.record_retry_authorization(
+        "task_retry_auth", "step_retry_auth", registry=registry,
+        principal=identity, occurred_at=211, authorization_now_epoch=211,
+    )
+    with pytest.raises(WorkflowConflictError, match="already exists"):
+        reconciler.record_retry_authorization(
+            "task_retry_auth", "step_retry_auth", registry=registry,
+            principal=identity, occurred_at=212, authorization_now_epoch=212,
+        )
+
+
+def test_retry_authorization_rejects_when_latest_review_is_inconclusive(tmp_path):
+    _, store, identity, registry, reconciler = _retry_authorization_fixture(tmp_path)
+    reconciler.record_review(
+        "task_retry_auth", "step_retry_auth", decision="inconclusive",
+        evidence_reference="provider:follow-up",
+        notes="The latest check cannot establish the operation outcome.",
+        principal=identity, occurred_at=212, authorization_now_epoch=212,
+    )
+    with pytest.raises(WorkflowConflictError, match="effect was not applied"):
+        reconciler.record_retry_authorization(
+            "task_retry_auth", "step_retry_auth", registry=registry,
+            principal=identity, occurred_at=213, authorization_now_epoch=213,
+        )
+
+
+def test_retry_authorization_audit_failure_rolls_back_record(tmp_path, monkeypatch):
+    _, store, identity, registry, reconciler = _retry_authorization_fixture(tmp_path)
+
+    def fail_audit(*args, **kwargs):
+        raise RuntimeError("simulated workflow audit failure")
+
+    monkeypatch.setattr(store, "_record_step_event", fail_audit)
+    with pytest.raises(RuntimeError, match="simulated workflow audit failure"):
+        reconciler.record_retry_authorization(
+            "task_retry_auth", "step_retry_auth", registry=registry,
+            principal=identity, occurred_at=211, authorization_now_epoch=211,
+        )
+    monkeypatch.undo()
+    events = store.list_workflow_events(
+        "task_retry_auth", principal=identity, authorization_now_epoch=212,
+    )
+    assert not any(event.event_type == "step.retry_authorization_recorded" for event in events)
