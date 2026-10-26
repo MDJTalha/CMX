@@ -195,3 +195,49 @@ def test_concurrent_reservations_create_exactly_one_operation(tmp_path):
     assert sum(1 for _, created in results if created) == 1
     assert len({record.operation_id for record, _ in results}) == 1
     assert len(store.list_events(key, principal=identity, authorization_now_epoch=210)) == 1
+
+
+def test_recovery_inventory_is_tenant_scoped_read_only_and_fail_closed(tmp_path):
+    tasks, store = make_store(tmp_path)
+    owner = principal()
+    reserved_key = key_for("recovery-reserved")
+    uncertain_key = key_for("recovery-uncertain")
+    success_key = key_for("recovery-success")
+    store.reserve("task_001:reserved", reserved_key, {"x": 1},
+                  principal=owner, occurred_at=200, authorization_now_epoch=200)
+    store.reserve("task_001:uncertain", uncertain_key, {"x": 2},
+                  principal=owner, occurred_at=201, authorization_now_epoch=201)
+    store.mark_dispatching(uncertain_key, principal=owner, occurred_at=202,
+                           authorization_now_epoch=202)
+    store.mark_uncertain(uncertain_key, principal=owner, occurred_at=203,
+                         authorization_now_epoch=203)
+    store.reserve("task_001:success", success_key, {"x": 3},
+                  principal=owner, occurred_at=204, authorization_now_epoch=204)
+    store.mark_dispatching(success_key, principal=owner, occurred_at=205,
+                           authorization_now_epoch=205)
+    store.mark_succeeded(success_key, {"ok": True}, principal=owner, occurred_at=206,
+                          authorization_now_epoch=206)
+
+    before_reserved = store.get(reserved_key, principal=owner, authorization_now_epoch=207)
+    before_uncertain = store.get(uncertain_key, principal=owner, authorization_now_epoch=207)
+    inventory = store.list_recovery_candidates(principal=owner, limit=10,
+                                               authorization_now_epoch=207)
+    assert {record.idempotency_key for record in inventory} == {reserved_key, uncertain_key}
+    assert {record.state for record in inventory} == {"reserved", "uncertain"}
+    assert store.get(reserved_key, principal=owner, authorization_now_epoch=207) == before_reserved
+    assert store.get(uncertain_key, principal=owner, authorization_now_epoch=207) == before_uncertain
+
+    other = owner.model_copy(update={"tenant_id": "tenant_other"})
+    assert store.list_recovery_candidates(principal=other, authorization_now_epoch=207) == ()
+
+    with pytest.raises(ValueError, match="between 1 and 500"):
+        store.list_recovery_candidates(principal=owner, limit=0, authorization_now_epoch=207)
+
+    with tasks._connection() as connection:
+        connection.execute(
+            "UPDATE cmx_idempotency_events SET payload_json = ? WHERE tenant_id = ? AND idempotency_key = ?",
+            ('{"tampered":true}', owner.tenant_id, reserved_key),
+        )
+    from cmx.idempotency import IdempotencyIntegrityError
+    with pytest.raises(IdempotencyIntegrityError, match="integrity verification"):
+        store.list_recovery_candidates(principal=owner, authorization_now_epoch=208)
