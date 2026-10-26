@@ -385,6 +385,10 @@ def test_atomic_non_application_resolution_marks_step_failed_and_audits_once(tmp
     assert result["resolution"] == "effect_not_applied"
     assert after.steps[0].status == "failed"
     assert after.workflow_state == "failed"
+    assert after.task.state.value == "failed"
+    assert store.task_store.verify_audit_chain(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    ) is True
     assert len(after_events) == len(before_events) + 1
     assert after_events[-1].event_type == "step.reconciliation_resolved_failed"
     assert after_events[-1].payload["details"]["review_event_id"] == result["review_event_id"]
@@ -414,3 +418,86 @@ def test_atomic_non_application_resolution_requires_latest_review(tmp_path):
         )
     after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
     assert before.steps[0].status == after.steps[0].status == "interrupted"
+
+def test_atomic_success_resolution_commits_output_and_audit_without_resuming(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="provider:ledger-success-1",
+        notes="Provider ledger confirms the operation completed.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    before_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=211,
+    )
+    result = reconciler.resolve_confirmed_success(
+        "task_001", "step_one", output_payload={"result": 42},
+        registry=registry, principal=identity, occurred_at=212, authorization_now_epoch=212,
+    )
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    after_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    assert result["committed"] is True
+    assert result["automatic_replay"] is False
+    assert result["workflow_resumed"] is False
+    assert result["status"] == "succeeded"
+    assert after.steps[0].status == "succeeded"
+    assert after.steps[0].output_payload == {"result": 42}
+    assert after.workflow_state == "failed"
+    assert after.task.state.value == "failed"
+    assert store.task_store.verify_audit_chain(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    ) is True
+    assert len(after_events) == len(before_events) + 1
+    assert after_events[-1].event_type == "step.reconciliation_resolved_succeeded"
+    assert after_events[-1].payload["details"]["review_event_id"] == result["review_event_id"]
+    assert after_events[-1].payload["details"]["workflow_resumed"] is False
+
+
+def test_atomic_success_resolution_rejects_invalid_output_without_mutation(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_confirmed",
+        evidence_reference="provider:ledger-success-2",
+        notes="Provider ledger confirms the operation completed.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    registry = CapabilityRegistry()
+    registry.register(CapabilitySpec(
+        capability_id="demo.transform", name="Transform demo value",
+        description="Controlled worker lease test.",
+        input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                      "required": ["value"], "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                       "required": ["result"], "additionalProperties": False},
+        required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+    ))
+    before = store.get_workflow("task_001", principal=identity, authorization_now_epoch=211)
+    before_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=211,
+    )
+    with pytest.raises(ValueError):
+        reconciler.resolve_confirmed_success(
+            "task_001", "step_one", output_payload={"unexpected": True},
+            registry=registry, principal=identity, occurred_at=212, authorization_now_epoch=212,
+        )
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    after_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    assert after.steps[0].status == before.steps[0].status == "interrupted"
+    assert after.workflow_state == before.workflow_state == "failed"
+    assert len(after_events) == len(before_events)
