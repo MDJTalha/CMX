@@ -231,8 +231,13 @@ class SQLiteWorkflowScheduler:
             )
             heartbeat_thread.start()
         try:
+            # In wall-clock mode, let the coordinator use its own live clock. Passing
+            # the claim timestamp here would disable the coordinator's step-lease
+            # heartbeat and make authorization checks stale during long-running work.
             outcome = coordinator.run_until_blocked(
-                job.task_id, principal=identity, authorization_now_epoch=now, max_steps=max_steps,
+                job.task_id, principal=identity,
+                authorization_now_epoch=None if use_wall_clock else now,
+                max_steps=max_steps,
             )
             finish_now = int(time.time()) if use_wall_clock else now
             if heartbeat_lost.is_set():
