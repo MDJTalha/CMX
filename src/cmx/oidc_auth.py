@@ -203,7 +203,7 @@ class OIDCAuthenticator:
             raise AuthorizationError("invalid_credential", "OIDC subject claim is invalid.")
         if isinstance(issued_at, bool) or not isinstance(issued_at, int) or isinstance(expires_at, bool) or not isinstance(expires_at, int):
             raise AuthorizationError("invalid_credential", "OIDC time claims are invalid.")
-        if issued_at > now + self.leeway_seconds or expires_at <= now - self.leeway_seconds or expires_at <= issued_at:
+        if issued_at > now or expires_at <= now or expires_at <= issued_at:
             raise AuthorizationError("invalid_credential", "OIDC token is not currently valid.")
         if self.require_mfa:
             amr = claims.get("amr", [])
