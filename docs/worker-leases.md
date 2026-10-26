@@ -19,7 +19,7 @@ This is still a single-node SQLite coordination design, not a distributed queue.
 
 ## Durable idempotency ledger
 
-CMX also maintains a tenant-scoped SQLite idempotency ledger for handler dispatch. Before a registered handler is invoked, the coordinator records a stable operation key, canonical request hash, pinned capability contract, plan hash, input and dependency outputs. The operation transitions from `reserved` to `dispatching`; successful output is recorded as `succeeded`. Handler exceptions, timeouts and output-validation failures are marked `uncertain` when possible. A still-`dispatching` record is also treated as uncertain and blocks reuse.
+CMX also maintains a tenant-scoped SQLite idempotency ledger for handler dispatch. Before a registered handler is invoked, the coordinator records a stable operation key, canonical request hash, pinned capability contract, plan hash, input and dependency outputs. The operation transitions from `reserved` to `dispatching`; successful output is recorded as `succeeded` in the same SQLite transaction that persists the workflow step's successful output and audit event. Handler exceptions, timeouts and output-validation failures are marked `uncertain` when possible. A still-`dispatching` record is also treated as uncertain and blocks reuse.
 
 The ledger rejects reuse of a key with a different scope or request payload, and its append-only transition events are hash chained and verifiable. Records and event reads are tenant scoped and mutations require `workflow:execute`.
 
