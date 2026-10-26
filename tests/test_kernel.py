@@ -423,11 +423,12 @@ def test_payload_validation_errors_do_not_echo_secret_values():
             step_id="step_one",
             capability_id="assessment.evaluate",
             objective="Evaluate the request.",
-            input_payload={"query": "supersecret-user-content"},
+            input_payload={"query": "valid query", "secret": "credential-value"},
         )
     ])
-    # The query fails only if the schema is tightened in a way that makes it invalid.
-    registry.validate_plan(unsafe, granted_permissions={"assessment:read"})
+    with pytest.raises(CapabilityPayloadValidationError) as captured:
+        registry.validate_plan(unsafe, granted_permissions={"assessment:read"})
+    assert "credential-value" not in str(captured.value)
 
 
 def test_schema_documents_are_bounded_by_size_and_depth():
