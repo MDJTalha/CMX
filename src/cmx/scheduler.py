@@ -7,6 +7,7 @@ This SQLite queue is not a distributed broker and must not be advertised as mult
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 import uuid
 from typing import Literal
