@@ -147,3 +147,41 @@ def test_issuance_rejects_terminal_or_changed_durable_record(tmp_path):
     )
     with pytest.raises(RetryAuthorizationError, match="binding or state"):
         issue(store, approver, terminal, decision, now=202)
+
+def test_concurrent_consumption_has_exactly_one_winner(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    _, _, store, approver, _, record, decision = setup(tmp_path)
+    issued = issue(store, approver, record, decision)
+    executors = [principal("executor_a"), principal("executor_b")]
+
+    def attempt(executor):
+        try:
+            return ("consumed", consume(store, executor, record, issued, now=201).executor_id)
+        except RetryAuthorizationError:
+            return ("rejected", executor.subject_id)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(attempt, executors))
+
+    assert sum(outcome[0] == "consumed" for outcome in outcomes) == 1
+    assert sum(outcome[0] == "rejected" for outcome in outcomes) == 1
+    with store.task_store._connection() as connection:
+        row = connection.execute(
+            "SELECT consumed_at, executor_id FROM cmx_retry_authorizations WHERE authorization_id=?",
+            (issued.authorization_id,),
+        ).fetchone()
+    assert row["consumed_at"] == 201
+    assert row["executor_id"] in {item.subject_id for item in executors}
+
+
+def test_consumed_authorization_is_never_restored_after_execution_failure(tmp_path):
+    _, _, store, approver, executor, record, decision = setup(tmp_path)
+    issued = issue(store, approver, record, decision)
+    consume(store, executor, record, issued)
+
+    # Model a process/provider failure after the durable authorization transaction
+    # commits. The ticket remains consumed; recovery must issue a new review and ticket.
+    with pytest.raises(RetryAuthorizationError, match="already been consumed"):
+        consume(store, executor, record, issued, now=202)
+
