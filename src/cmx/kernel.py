@@ -112,6 +112,8 @@ class TaskRecord(BaseModel):
 
     def apply(self, event: TaskEvent, *, expected_version: int) -> "TaskRecord":
         """Apply one transition with optimistic-concurrency protection."""
+        if isinstance(expected_version, bool) or not isinstance(expected_version, int):
+            raise StaleTaskVersionError("Expected task version must be an integer.")
         if expected_version != self.version:
             raise StaleTaskVersionError(
                 f"Expected task version {expected_version}, current version is {self.version}."
