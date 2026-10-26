@@ -501,3 +501,58 @@ def test_atomic_success_resolution_rejects_invalid_output_without_mutation(tmp_p
     assert after.steps[0].status == before.steps[0].status == "interrupted"
     assert after.workflow_state == before.workflow_state == "failed"
     assert len(after_events) == len(before_events)
+
+@pytest.mark.parametrize("decision", ["effect_not_applied", "effect_confirmed"])
+def test_reconciliation_resolution_cannot_cross_tenant_boundary(tmp_path, decision):
+    from cmx.workflow_store import WorkflowNotFoundError
+
+    store, owner = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision=decision,
+        evidence_reference="provider:tenant-isolation",
+        notes="Evidence recorded by the owning tenant.",
+        principal=owner, occurred_at=210, authorization_now_epoch=210,
+    )
+    outsider_base = principal(tenant_id="tenant_beta")
+    outsider = outsider_base.model_copy(update={
+        "permissions": outsider_base.permissions
+        | frozenset({"workflow:reconcile", "audit:read"}),
+    })
+    before = store.get_workflow("task_001", principal=owner, authorization_now_epoch=211)
+    before_events = store.list_workflow_events(
+        "task_001", principal=owner, authorization_now_epoch=211,
+    )
+
+    if decision == "effect_not_applied":
+        with pytest.raises(WorkflowNotFoundError):
+            reconciler.resolve_confirmed_non_application(
+                "task_001", "step_one", principal=outsider,
+                occurred_at=212, authorization_now_epoch=212,
+            )
+    else:
+        registry = CapabilityRegistry()
+        registry.register(CapabilitySpec(
+            capability_id="demo.transform", name="Transform demo value",
+            description="Controlled worker lease test.",
+            input_schema={"type": "object", "properties": {"value": {"type": "number"}},
+                          "required": ["value"], "additionalProperties": False},
+            output_schema={"type": "object", "properties": {"result": {"type": "number"}},
+                           "required": ["result"], "additionalProperties": False},
+            required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
+        ))
+        with pytest.raises(WorkflowNotFoundError):
+            reconciler.resolve_confirmed_success(
+                "task_001", "step_one", output_payload={"result": 42},
+                registry=registry, principal=outsider,
+                occurred_at=212, authorization_now_epoch=212,
+            )
+
+    after = store.get_workflow("task_001", principal=owner, authorization_now_epoch=212)
+    after_events = store.list_workflow_events(
+        "task_001", principal=owner, authorization_now_epoch=212,
+    )
+    assert after.steps[0].status == before.steps[0].status == "interrupted"
+    assert after.workflow_state == before.workflow_state == "failed"
+    assert after.task.state == before.task.state
+    assert len(after_events) == len(before_events)
