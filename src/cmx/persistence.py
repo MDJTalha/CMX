@@ -409,6 +409,8 @@ class SQLiteTaskStore:
         existing = cls._audit_rows(connection, tenant_id, task_id)
         if existing and not cls._verify_rows(existing):
             raise AuditIntegrityError("Existing audit history failed its integrity check.")
+        if existing and occurred_at < existing[-1]["occurred_at"]:
+            raise ValueError("Audit event timestamps must not move backwards.")
         expected_sequence = len(existing)
         if sequence != expected_sequence:
             raise AuditIntegrityError("Audit sequence does not match the current task version.")
@@ -541,7 +543,12 @@ class SQLiteTaskStore:
                 """,
                 (identity.tenant_id, task_id),
             ).fetchone()
-        return self._task_from_row(row) if row is not None else None
+            if row is None:
+                return None
+            rows = self._audit_rows(connection, identity.tenant_id, task_id)
+        if not self._verify_rows(rows) or not self._latest_matches_task(row, rows):
+            raise AuditIntegrityError("Task record does not match its audit history.")
+        return self._task_from_row(row)
 
     def apply_event(
         self,
@@ -569,6 +576,9 @@ class SQLiteTaskStore:
                 ).fetchone()
                 if row is None:
                     raise TaskNotFoundError("Task was not found in the active tenant.")
+                current_history = self._audit_rows(connection, identity.tenant_id, task_id)
+                if not self._verify_rows(current_history) or not self._latest_matches_task(row, current_history):
+                    raise AuditIntegrityError("Task record does not match its audit history.")
                 current = self._task_from_row(row)
                 updated = current.apply(event, expected_version=expected_version)
                 cursor = connection.execute(
@@ -678,16 +688,4 @@ class SQLiteTaskStore:
                 return False
             rows = self._audit_rows(connection, identity.tenant_id, task_id)
 
-        if not rows or not self._verify_rows(rows):
-            return False
-        last = rows[-1]
-        payload = self._row_payload(last)
-        expected_last_event = task["last_event"]
-        return (
-            last["sequence"] == task["version"]
-            and payload.get("version") == task["version"]
-            and payload.get("state") == task["state"]
-            and payload.get("attempts") == task["attempts"]
-            and payload.get("max_attempts") == task["max_attempts"]
-            and payload.get("last_event") == expected_last_event
-        )
+        return self._verify_rows(rows) and self._latest_matches_task(task, rows)
