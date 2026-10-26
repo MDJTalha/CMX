@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
+from contextlib import contextmanager
 import time
 from pathlib import Path
 from typing import Any, Iterable
@@ -34,7 +35,7 @@ class OIDCIdentityStore:
     def __init__(self, database_path: str | Path) -> None:
         self.database_path = str(database_path)
         Path(self.database_path).parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS cmx_oidc_memberships (
                     issuer TEXT NOT NULL,
@@ -54,6 +55,14 @@ class OIDCIdentityStore:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=10000")
         return connection
+
+    @contextmanager
+    def _connection(self):
+        connection = self._connect()
+        try:
+            yield connection
+        finally:
+            connection.close()
 
     @staticmethod
     def _validate_permissions(permissions: Iterable[str]) -> list[str]:
@@ -144,7 +153,7 @@ class OIDCAuthenticator:
             raise OIDCConfigurationError("jwks_url must be an HTTPS URL.")
         if isinstance(leeway_seconds, bool) or not isinstance(leeway_seconds, int) or not 0 <= leeway_seconds <= 120:
             raise OIDCConfigurationError("leeway_seconds must be between 0 and 120.")
-        self.issuer = issuer.rstrip("/")
+        self.issuer = issuer
         self.audience = audience
         self.jwks_url = jwks_url
         self.identity_store = identity_store
@@ -157,6 +166,8 @@ class OIDCAuthenticator:
         self, token: str, *, tenant_id: str, now_epoch: int | None = None,
     ) -> PrincipalContext:
         now = int(time.time()) if now_epoch is None else now_epoch
+        if isinstance(now, bool) or not isinstance(now, int) or now < 0:
+            raise ValueError("now_epoch must be a non-negative integer.")
         if not isinstance(token, str) or not token or len(token) > 16384:
             raise AuthorizationError("invalid_credential", "A valid OIDC bearer token is required.")
         if not isinstance(tenant_id, str) or not _TENANT_RE.fullmatch(tenant_id):
