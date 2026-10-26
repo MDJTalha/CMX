@@ -426,7 +426,9 @@ def test_input_and_output_validation_require_capability_permissions():
         registry.validate_output(
             "assessment.evaluate",
             {"decision": "go"},
-            granted_permissions=set(),
+            principal=make_principal(permissions=frozenset()),
+            resource_tenant_id="tenant_alpha",
+            now_epoch=150,
         )
     registry.validate_input(
         "assessment.evaluate",
@@ -438,13 +440,17 @@ def test_input_and_output_validation_require_capability_permissions():
     registry.validate_output(
         "assessment.evaluate",
         {"decision": "go"},
-        granted_permissions={"assessment:read"},
+        principal=make_principal(),
+        resource_tenant_id="tenant_alpha",
+        now_epoch=150,
     )
     with pytest.raises(CapabilityPayloadValidationError):
         registry.validate_output(
             "assessment.evaluate",
             {},
-            granted_permissions={"assessment:read"},
+            principal=make_principal(),
+            resource_tenant_id="tenant_alpha",
+            now_epoch=150,
         )
 
 
@@ -460,7 +466,7 @@ def test_payload_validation_errors_do_not_echo_secret_values():
         )
     ])
     with pytest.raises(CapabilityPayloadValidationError) as captured:
-        registry.validate_plan(unsafe, granted_permissions={"assessment:read"})
+        registry.validate_plan(unsafe, principal=make_principal(), resource_tenant_id="tenant_alpha", now_epoch=150)
     assert "credential-value" not in str(captured.value)
 
 
