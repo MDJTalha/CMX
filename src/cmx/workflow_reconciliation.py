@@ -4,13 +4,14 @@ This module records evidence-backed decisions without replaying handlers or sile
 rewriting terminal workflow state. It deliberately remains audit-only.
 """
 from __future__ import annotations
+import hmac
 from typing import Any, Literal
 
 from cmx.kernel import CapabilityRegistry
 from cmx.schema_validation import validate_json_payload
 from cmx.persistence import _timestamp, _validate_identifier
 from cmx.security import PrincipalContext
-from cmx.workflow_store import SQLiteWorkflowStore, WorkflowConflictError, WorkflowIntegrityError, WorkflowNotFoundError
+from cmx.workflow_store import SQLiteWorkflowStore, WorkflowConflictError, WorkflowIntegrityError, WorkflowNotFoundError, _approval_fingerprint
 
 ReconciliationDecision = Literal["effect_confirmed", "effect_not_applied", "inconclusive"]
 
@@ -255,17 +256,34 @@ class SQLiteWorkflowReconciler:
             attempts = row["attempts"]
             max_attempts = row["max_attempts"]
             requires_approval = bool(row["requires_approval"])
-            approved = row["approved_by"] is not None and row["approved_at"] is not None and row["approval_fingerprint"] is not None
+            approved_by = row["approved_by"]
+            approved_at = row["approved_at"]
+            recorded_approval_fingerprint = row["approval_fingerprint"]
+            pinned_plan_hash = plan_row["plan_hash"]
         capability = registry.get(capability_id)
         from cmx.orchestration import _capability_fingerprint
         if capability.version != pinned_version or _capability_fingerprint(capability) != pinned_fingerprint:
             raise WorkflowConflictError(
                 "The registered capability no longer matches the pinned contract; retry candidacy is blocked."
             )
-        if requires_approval and not approved:
-            raise WorkflowConflictError(
-                "Retry candidacy requires a retained approval; request fresh approval before retry."
+        if requires_approval:
+            expected_approval_fingerprint = _approval_fingerprint(
+                tenant_id=identity.tenant_id,
+                task_id=task_id,
+                plan_hash=pinned_plan_hash,
+                step=spec,
+                capability_version=pinned_version,
+                capability_fingerprint=pinned_fingerprint,
             )
+            if (
+                approved_by is None
+                or approved_at is None
+                or recorded_approval_fingerprint is None
+                or not hmac.compare_digest(recorded_approval_fingerprint, expected_approval_fingerprint)
+            ):
+                raise WorkflowConflictError(
+                    "Retry candidacy requires a valid input-bound approval; request fresh approval before retry."
+                )
         return {
             "task_id": task_id, "step_id": step_id, "attempts": attempts,
             "max_attempts": max_attempts, "candidate": True, "committed": False,
