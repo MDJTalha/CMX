@@ -3,8 +3,10 @@ import hashlib
 import pytest
 from pydantic import ValidationError
 
-from cmx.idempotency import IdempotencyRecord
-from cmx.recovery import ProviderObservation, evaluate_provider_observation
+from cmx.idempotency import IdempotencyRecord, SQLiteIdempotencyStore
+from cmx.persistence import SQLiteTaskStore
+from cmx.recovery import ProviderObservation, RecoveryReviewService, evaluate_provider_observation
+from cmx.security import PrincipalContext
 
 
 def make_record(*, state="uncertain"):
@@ -146,3 +148,76 @@ def test_provider_observation_rejects_malformed_keys_and_extra_fields():
             idempotency_key=record.idempotency_key, outcome="not_applied",
             observed_at=200, evidence_ref="evidence:1", untrusted="extra",
         )
+
+def test_recovery_review_service_reads_ledger_and_calls_provider_lookup_only(tmp_path):
+    tasks = SQLiteTaskStore(tmp_path / "recovery-review.sqlite3")
+    ledger = SQLiteIdempotencyStore(tasks)
+    principal = PrincipalContext(
+        subject_id="operator_1", tenant_id="tenant-1", issuer="https://identity.cmx.test",
+        permissions=frozenset({"workflow:execute", "workflow:read", "audit:read"}),
+        issued_at=100, expires_at=1000, authentication_verified=True,
+        authentication_method="test", credential_id="cred_operator_1",
+    )
+    key = hashlib.sha256(b"provider-recovery-key").hexdigest()
+    record, created = ledger.reserve(
+        "task-1:step-1", key, {"amount": 5}, principal=principal,
+        occurred_at=110, authorization_now_epoch=110,
+    )
+    assert created
+    ledger.mark_dispatching(
+        key, principal=principal, occurred_at=120, authorization_now_epoch=120,
+    )
+
+    class ReadOnlyProvider:
+        provider_id = "provider.test"
+        def __init__(self):
+            self.calls = []
+        def lookup(self, *, operation_id, idempotency_key):
+            self.calls.append((operation_id, idempotency_key))
+            return ProviderObservation(
+                provider_id=self.provider_id, operation_id=operation_id,
+                idempotency_key=idempotency_key, outcome="not_applied",
+                observed_at=195, evidence_ref="provider-audit:review-1",
+            )
+
+    provider = ReadOnlyProvider()
+    result = RecoveryReviewService(ledger).review(
+        key, adapter=provider, principal=principal, now_epoch=200,
+        provider_idempotency_supported=True,
+    )
+
+    assert result.operation_id == record.operation_id
+    assert result.idempotency_key == key
+    assert result.request_hash == record.request_hash
+    assert result.decision.disposition == "retry_candidate"
+    assert result.decision.safe_to_replay is False
+    assert provider.calls == [(record.operation_id, key)]
+    # Reviewing evidence is read-only: it cannot advance the durable operation.
+    assert ledger.get(key, principal=principal, authorization_now_epoch=200).state == "dispatching"
+
+
+def test_recovery_review_service_does_not_call_provider_for_reserved_operation(tmp_path):
+    tasks = SQLiteTaskStore(tmp_path / "recovery-review-reserved.sqlite3")
+    ledger = SQLiteIdempotencyStore(tasks)
+    principal = PrincipalContext(
+        subject_id="operator_1", tenant_id="tenant-1", issuer="https://identity.cmx.test",
+        permissions=frozenset({"workflow:execute", "workflow:read", "audit:read"}),
+        issued_at=100, expires_at=1000, authentication_verified=True,
+        authentication_method="test", credential_id="cred_operator_1",
+    )
+    key = hashlib.sha256(b"reserved-operation").hexdigest()
+    ledger.reserve("task-1:step-1", key, {"amount": 5}, principal=principal,
+                   occurred_at=110, authorization_now_epoch=110)
+
+    class ProviderMustNotBeCalled:
+        provider_id = "provider.test"
+        def lookup(self, **kwargs):
+            raise AssertionError("Provider lookup must not run for a reserved operation.")
+
+    result = RecoveryReviewService(ledger).review(
+        key, adapter=ProviderMustNotBeCalled(), principal=principal, now_epoch=200,
+    )
+    assert result.decision.disposition == "manual_review"
+    assert result.decision.safe_to_replay is False
+    assert result.provider_observation.outcome == "unknown"
+
