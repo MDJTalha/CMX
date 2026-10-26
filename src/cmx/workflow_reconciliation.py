@@ -186,6 +186,109 @@ class SQLiteWorkflowReconciler:
         }
 
 
+    def resolve_confirmed_non_application(
+        self,
+        task_id: str,
+        step_id: str,
+        *,
+        principal: PrincipalContext,
+        occurred_at: int | None = None,
+        authorization_now_epoch: int | None = None,
+    ) -> dict[str, object]:
+        """Atomically resolve an interrupted step as failed after a review confirms no effect.
+
+        This terminal resolution never retries or invokes the handler. The workflow remains
+        failed; step state and the corresponding hash-chained audit event commit together.
+        """
+        identity = self.workflow_store._authorize(
+            principal,
+            {"workflow:reconcile", "workflow:execute", "workflow:read", "tasks:write", "audit:read"},
+            authorization_now_epoch,
+        )
+        _validate_identifier(task_id, "task_id")
+        _validate_identifier(step_id, "step_id")
+        timestamp = _timestamp(occurred_at)
+        now_epoch = _timestamp(authorization_now_epoch)
+        with self.task_store._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self.workflow_store._assert_workflow_integrity(connection, identity.tenant_id, task_id)
+                plan_row = self.workflow_store._plan_row(connection, identity.tenant_id, task_id)
+                if plan_row is None:
+                    raise WorkflowNotFoundError("Workflow was not found in the active tenant.")
+                if plan_row["state"] != "failed":
+                    raise WorkflowConflictError(
+                        "Non-application resolution requires the workflow to remain in the failed state."
+                    )
+                row = connection.execute(
+                    """SELECT status FROM cmx_workflow_steps
+                       WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
+                    (identity.tenant_id, task_id, step_id),
+                ).fetchone()
+                if row is None:
+                    raise WorkflowNotFoundError("Workflow step was not found in the active tenant.")
+                if row["status"] != "interrupted":
+                    raise WorkflowConflictError("Only an interrupted step can be resolved as failed.")
+                lease = connection.execute(
+                    """SELECT expires_at FROM cmx_worker_leases
+                       WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
+                    (identity.tenant_id, task_id, step_id),
+                ).fetchone()
+                if lease is not None and lease["expires_at"] > now_epoch:
+                    raise WorkflowConflictError("A live worker lease exists; resolution is blocked.")
+                latest_review = None
+                for event in self.workflow_store._event_rows(connection, identity.tenant_id, task_id):
+                    if event["event_type"] != "step.reconciliation_recorded":
+                        continue
+                    payload = self.workflow_store._decode_event_payload(event)
+                    if payload.get("step_id") == step_id and isinstance(payload.get("details"), dict):
+                        latest_review = (event["event_id"], payload["details"])
+                if latest_review is None or latest_review[1].get("decision") != "effect_not_applied":
+                    raise WorkflowConflictError(
+                        "The latest reconciliation review must confirm the effect was not applied."
+                    )
+                connection.execute(
+                    """UPDATE cmx_workflow_steps
+                       SET status = 'failed', error_code = 'effect_not_applied', updated_at = ?
+                       WHERE tenant_id = ? AND task_id = ? AND step_id = ? AND status = 'interrupted'""",
+                    (timestamp, identity.tenant_id, task_id, step_id),
+                )
+                self.workflow_store._record_step_event(
+                    connection,
+                    tenant_id=identity.tenant_id,
+                    task_id=task_id,
+                    actor_id=identity.subject_id,
+                    occurred_at=timestamp,
+                    event_type="step.reconciliation_resolved_failed",
+                    workflow_state="failed",
+                    step_id=step_id,
+                    extra_payload={
+                        "decision": "effect_not_applied",
+                        "review_event_id": latest_review[0],
+                        "automatic_replay": False,
+                    },
+                )
+                final = connection.execute(
+                    """SELECT * FROM cmx_workflow_steps
+                       WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
+                    (identity.tenant_id, task_id, step_id),
+                ).fetchone()
+                connection.execute("COMMIT")
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
+        resolved = self.workflow_store._row_to_step(final)
+        return {
+            "task_id": task_id,
+            "step_id": step_id,
+            "status": resolved.status,
+            "workflow_state": "failed",
+            "resolution": "effect_not_applied",
+            "committed": True,
+            "automatic_replay": False,
+            "review_event_id": latest_review[0],
+        }
+
     def validate_retry_candidate(
         self,
         task_id: str,

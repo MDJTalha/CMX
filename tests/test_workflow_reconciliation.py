@@ -357,3 +357,60 @@ def test_retry_candidate_is_read_only_when_all_preconditions_hold(tmp_path):
     assert result["automatic_replay"] is False
     assert before.steps[0].status == after.steps[0].status == "interrupted"
     assert before.steps[0].attempts == after.steps[0].attempts == 1
+
+
+
+def test_atomic_non_application_resolution_marks_step_failed_and_audits_once(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_not_applied",
+        evidence_reference="provider:lookup-atomic-1",
+        notes="Independent provider evidence confirms no side effect was applied.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    before_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=211,
+    )
+    result = reconciler.resolve_confirmed_non_application(
+        "task_001", "step_one", principal=identity,
+        occurred_at=212, authorization_now_epoch=212,
+    )
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    after_events = store.list_workflow_events(
+        "task_001", principal=identity, authorization_now_epoch=212,
+    )
+    assert result["committed"] is True
+    assert result["automatic_replay"] is False
+    assert result["resolution"] == "effect_not_applied"
+    assert after.steps[0].status == "failed"
+    assert after.workflow_state == "failed"
+    assert len(after_events) == len(before_events) + 1
+    assert after_events[-1].event_type == "step.reconciliation_resolved_failed"
+    assert after_events[-1].payload["details"]["review_event_id"] == result["review_event_id"]
+    assert after_events[-1].payload["details"]["automatic_replay"] is False
+
+
+def test_atomic_non_application_resolution_requires_latest_review(tmp_path):
+    store, identity = interrupted_store(tmp_path)
+    reconciler = SQLiteWorkflowReconciler(store)
+    reconciler.record_review(
+        "task_001", "step_one", decision="effect_not_applied",
+        evidence_reference="provider:lookup-atomic-2",
+        notes="Initial review confirms no side effect.",
+        principal=identity, occurred_at=210, authorization_now_epoch=210,
+    )
+    reconciler.record_review(
+        "task_001", "step_one", decision="inconclusive",
+        evidence_reference="incident:atomic-2",
+        notes="A later review reopened uncertainty.",
+        principal=identity, occurred_at=211, authorization_now_epoch=211,
+    )
+    before = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    with pytest.raises(WorkflowConflictError, match="latest reconciliation review"):
+        reconciler.resolve_confirmed_non_application(
+            "task_001", "step_one", principal=identity,
+            occurred_at=212, authorization_now_epoch=212,
+        )
+    after = store.get_workflow("task_001", principal=identity, authorization_now_epoch=212)
+    assert before.steps[0].status == after.steps[0].status == "interrupted"
