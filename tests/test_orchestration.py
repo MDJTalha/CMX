@@ -544,3 +544,23 @@ def test_capability_contract_drift_between_steps_stops_before_next_handler(tmp_p
     assert task_store.get_task(
         "task_001", principal=principal(), authorization_now_epoch=150
     ).state == TaskState.RUNNING
+
+
+def test_oversized_workflow_plan_is_rejected_before_task_creation(tmp_path):
+    task_store, _, _, coordinator = stack(tmp_path)
+    large_text = "x" * 200_000
+    steps = [
+        PlanStep(
+            step_id=f"step_{index}",
+            capability_id="demo.transform",
+            objective=f"Hold bounded payload {index}.",
+            input_payload={"value": index, "note": large_text},
+        )
+        for index in range(1, 7)
+    ]
+    plan = make_plan(steps, plan_id="plan_large")
+    with pytest.raises(ValueError, match="maximum encoded size"):
+        submit(coordinator, plan)
+    assert task_store.get_task(
+        "task_001", principal=principal(), authorization_now_epoch=150
+    ) is None
