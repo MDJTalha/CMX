@@ -30,7 +30,11 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 - [x] Add fail-closed tenant-scoped authorization policy against an internally supplied principal context
 - [ ] Connect a real authentication/session verifier and persist identity-bound audit records
 - [x] Validate capability schemas and plan inputs against bounded JSON Schema Draft 2020-12 contracts
-- [ ] Add a constrained executor interface
+- [x] Add a controlled coordinator for explicitly injected capability handlers and topologically ordered plans
+- [x] Persist immutable workflow plans, step states/results, approvals and hash-chained workflow audit events
+- [x] Bind approval records to plan hash, inputs and capability-contract fingerprint
+- [ ] Enforce handler deadlines with a tested isolation boundary and define safe retry/idempotency policy
+- [ ] Add background worker scheduling and multi-worker claim/lease semantics
 - [x] Add file-backed SQLite task persistence, optimistic version checks and transactional audit append tests
 
 ## Phase 3 — Evidence retrieval and model adapters
