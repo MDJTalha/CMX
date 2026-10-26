@@ -267,7 +267,7 @@ def test_side_effect_step_waits_for_explicit_tenant_scoped_approval(tmp_path):
     assert approved.status == "pending"
 
     final = coordinator.run_until_blocked(
-        "task_001", principal=principal(), authorization_now_epoch=150
+        "task_001", principal=principal(), authorization_now_epoch=152
     )
     assert final.status == "succeeded"
     assert len(calls) == 1
