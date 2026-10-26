@@ -4,8 +4,10 @@ This module records evidence-backed decisions without replaying handlers or sile
 rewriting terminal workflow state. It deliberately remains audit-only.
 """
 from __future__ import annotations
-from typing import Literal
+from typing import Any, Literal
 
+from cmx.kernel import CapabilityRegistry
+from cmx.schema_validation import validate_json_payload
 from cmx.persistence import _timestamp, _validate_identifier
 from cmx.security import PrincipalContext
 from cmx.workflow_store import SQLiteWorkflowStore, WorkflowConflictError, WorkflowNotFoundError
@@ -96,6 +98,91 @@ class SQLiteWorkflowReconciler:
                     "automatic_replay": False,
                 })
         return inventory
+
+
+    def validate_success_resolution(
+        self,
+        task_id: str,
+        step_id: str,
+        *,
+        output_payload: Any,
+        registry: CapabilityRegistry,
+        principal: PrincipalContext,
+        authorization_now_epoch: int | None = None,
+    ) -> dict[str, object]:
+        """Validate a proposed successful resolution without committing workflow state.
+
+        This is a preflight only. It requires the latest review to confirm the external
+        effect, a non-live lease, and an unchanged pinned capability contract. It never
+        writes the supplied output or marks a step successful.
+        """
+        identity = self.workflow_store._authorize(
+            principal, {"workflow:reconcile", "workflow:read", "tasks:read", "audit:read"},
+            authorization_now_epoch,
+        )
+        _validate_identifier(task_id, "task_id")
+        _validate_identifier(step_id, "step_id")
+        now_epoch = _timestamp(authorization_now_epoch)
+        with self.task_store._connection() as connection:
+            self.workflow_store._assert_workflow_integrity(connection, identity.tenant_id, task_id)
+            plan_row = self.workflow_store._plan_row(connection, identity.tenant_id, task_id)
+            if plan_row is None:
+                raise WorkflowNotFoundError("Workflow was not found in the active tenant.")
+            step_row = connection.execute(
+                """SELECT * FROM cmx_workflow_steps
+                   WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
+                (identity.tenant_id, task_id, step_id),
+            ).fetchone()
+            if step_row is None:
+                raise WorkflowNotFoundError("Workflow step was not found in the active tenant.")
+            if step_row["status"] != "interrupted":
+                raise WorkflowConflictError("Only an interrupted step can be preflighted for success resolution.")
+            lease = connection.execute(
+                """SELECT expires_at FROM cmx_worker_leases
+                   WHERE tenant_id = ? AND task_id = ? AND step_id = ?""",
+                (identity.tenant_id, task_id, step_id),
+            ).fetchone()
+            if lease is not None and lease["expires_at"] > now_epoch:
+                raise WorkflowConflictError("A live worker lease exists; success resolution is blocked.")
+            event_rows = self.workflow_store._event_rows(connection, identity.tenant_id, task_id)
+            reviews = []
+            for event in event_rows:
+                if event["event_type"] != "step.reconciliation_recorded":
+                    continue
+                payload = self.workflow_store._decode_event_payload(event)
+                if payload.get("step_id") != step_id:
+                    continue
+                details = payload.get("details")
+                if isinstance(details, dict):
+                    reviews.append(details)
+            if not reviews or reviews[-1].get("decision") != "effect_confirmed":
+                raise WorkflowConflictError(
+                    "The latest reconciliation review must confirm the external effect before success preflight."
+                )
+            capability_id = step_row["capability_id"]
+            pinned_version = step_row["capability_version"]
+            pinned_fingerprint = step_row["capability_fingerprint"]
+
+        capability = registry.get(capability_id)
+        from cmx.orchestration import _capability_fingerprint
+        if capability.version != pinned_version or _capability_fingerprint(capability) != pinned_fingerprint:
+            raise WorkflowConflictError(
+                "The registered capability no longer matches the pinned contract; success resolution is blocked."
+            )
+        validate_json_payload(
+            capability.output_schema, output_payload, label="Reconciled capability output"
+        )
+        return {
+            "task_id": task_id,
+            "step_id": step_id,
+            "capability_id": capability_id,
+            "capability_version": pinned_version,
+            "output_payload": output_payload,
+            "validated": True,
+            "committed": False,
+            "workflow_state_changed": False,
+            "automatic_replay": False,
+        }
 
     def record_review(
         self, task_id: str, step_id: str, *,
