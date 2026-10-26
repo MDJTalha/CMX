@@ -277,7 +277,7 @@ def test_verification_rejects_results_for_unknown_criteria():
 
 
 def test_verification_contract_requires_at_least_one_mandatory_criterion():
-    with pytest.raises(ValidationError, match="at least one"):
+    with pytest.raises(ValidationError, match="At least one"):
         VerificationContract(
             contract_id="verify_002",
             objective="Verify a sample task.",
