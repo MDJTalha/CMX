@@ -468,6 +468,8 @@ class SQLiteWorkflowStore:
         step_rows: Sequence[sqlite3.Row],
         event_rows: Sequence[sqlite3.Row],
     ) -> tuple[ExecutionPlan, dict[str, Any]] | None:
+        if len(plan_row["plan_json"].encode("utf-8")) > 1_048_576:
+            return None
         try:
             decoded = json.loads(plan_row["plan_json"])
             canonical = _canonical_json(decoded)
@@ -616,6 +618,8 @@ class SQLiteWorkflowStore:
 
         plan_data = plan.model_dump(mode="json")
         plan_json = _canonical_json(plan_data)
+        if len(plan_json.encode("utf-8")) > 1_048_576:
+            raise ValueError("Workflow plan exceeds the maximum encoded size of 1048576 bytes.")
         plan_hash = hashlib.sha256(plan_json.encode("utf-8")).hexdigest()
         try:
             with self.task_store._connection() as connection:
