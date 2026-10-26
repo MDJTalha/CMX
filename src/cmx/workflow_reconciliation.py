@@ -10,7 +10,7 @@ from cmx.kernel import CapabilityRegistry
 from cmx.schema_validation import validate_json_payload
 from cmx.persistence import _timestamp, _validate_identifier
 from cmx.security import PrincipalContext
-from cmx.workflow_store import SQLiteWorkflowStore, WorkflowConflictError, WorkflowNotFoundError
+from cmx.workflow_store import SQLiteWorkflowStore, WorkflowConflictError, WorkflowIntegrityError, WorkflowNotFoundError
 
 ReconciliationDecision = Literal["effect_confirmed", "effect_not_applied", "inconclusive"]
 
