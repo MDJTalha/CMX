@@ -286,7 +286,7 @@ def test_retry_candidate_does_not_treat_confirmed_effect_as_retryable(tmp_path):
                        "required": ["result"], "additionalProperties": False},
         required_permissions=["demo:execute"], timeout_seconds=10, max_retries=0,
     ))
-    with pytest.raises(WorkflowConflictError, match="retry limit"):
+    with pytest.raises(WorkflowConflictError, match="effect was not applied"):
         reconciler.validate_retry_candidate(
             "task_001", "step_one", registry=registry,
             principal=identity, authorization_now_epoch=211,
