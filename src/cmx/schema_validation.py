@@ -31,21 +31,28 @@ class CapabilityPayloadValidationError(ValueError):
 
 
 def _container_depth(value: Any) -> int:
-    """Return maximum nesting of JSON containers without recursive traversal."""
+    """Return maximum nesting of JSON containers and reject circular Python values."""
     maximum = 0
-    stack: list[tuple[Any, int]] = [(value, 0)]
+    active: set[int] = set()
+    stack: list[tuple[Any, int, bool]] = [(value, 0, False)]
     while stack:
-        current, depth = stack.pop()
-        if isinstance(current, dict):
-            depth += 1
-            maximum = max(maximum, depth)
-            stack.extend((child, depth) for child in current.values())
-        elif isinstance(current, list):
-            depth += 1
-            maximum = max(maximum, depth)
-            stack.extend((child, depth) for child in current)
+        current, depth, leaving = stack.pop()
+        if not isinstance(current, (dict, list)):
+            continue
+        identity = id(current)
+        if leaving:
+            active.remove(identity)
+            continue
+        if identity in active:
+            raise ValueError("JSON values must not contain circular references.")
+        depth += 1
+        maximum = max(maximum, depth)
+        active.add(identity)
+        stack.append((current, depth, True))
+        children = current.values() if isinstance(current, dict) else current
+        for child in reversed(list(children)):
+            stack.append((child, depth, False))
     return maximum
-
 
 def _encode_json(value: Any, *, label: str, max_bytes: int, max_depth: int) -> str:
     if _container_depth(value) > max_depth:
