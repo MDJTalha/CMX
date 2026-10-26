@@ -727,3 +727,47 @@ def test_retry_authorization_consumption_rolls_back_when_audit_write_fails(tmp_p
         and event.payload.get("details", {}).get("authorization_id") == authorization["authorization_id"]
         for event in events
     )
+
+
+
+def test_retry_authorization_consumption_is_tenant_scoped(tmp_path):
+    _, store, owner, registry, reconciler = _retry_authorization_fixture(tmp_path)
+    authorization = reconciler.record_retry_authorization(
+        "task_retry_auth", "step_retry_auth", registry=registry,
+        principal=owner, occurred_at=211, authorization_now_epoch=211,
+    )
+    other_tenant = owner.model_copy(update={"tenant_id": "tenant_other"})
+    with pytest.raises(Exception) as exc_info:
+        reconciler.consume_retry_authorization(
+            "task_retry_auth", "step_retry_auth", authorization["authorization_id"],
+            registry=registry, principal=other_tenant,
+            occurred_at=212, authorization_now_epoch=212,
+        )
+    assert "not found" in str(exc_info.value).lower()
+    events = store.list_workflow_events(
+        "task_retry_auth", principal=owner, authorization_now_epoch=213,
+    )
+    assert not any(
+        event.event_type == "step.retry_authorization_consumed"
+        for event in events
+    )
+
+
+def test_retry_authorization_consumption_requires_reconciliation_permission(tmp_path):
+    _, _, owner, registry, reconciler = _retry_authorization_fixture(tmp_path)
+    authorization = reconciler.record_retry_authorization(
+        "task_retry_auth", "step_retry_auth", registry=registry,
+        principal=owner, occurred_at=211, authorization_now_epoch=211,
+    )
+    unauthorized = owner.model_copy(update={
+        "permissions": frozenset(
+            permission for permission in owner.permissions
+            if permission != "workflow:reconcile"
+        )
+    })
+    with pytest.raises(AuthorizationError):
+        reconciler.consume_retry_authorization(
+            "task_retry_auth", "step_retry_auth", authorization["authorization_id"],
+            registry=registry, principal=unauthorized,
+            occurred_at=212, authorization_now_epoch=212,
+        )
