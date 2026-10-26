@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import jwt
+from jwt.exceptions import PyJWKClientConnectionError
 from pydantic import ValidationError
 
 from cmx.security import AuthorizationError, PrincipalContext
@@ -27,6 +28,10 @@ _MFA_METHODS = frozenset({"mfa", "otp", "hwk", "swk", "webauthn"})
 
 class OIDCConfigurationError(ValueError):
     """OIDC verifier configuration is missing or unsafe."""
+
+
+class OIDCProviderUnavailable(RuntimeError):
+    """The configured identity provider's JWKS endpoint could not be reached."""
 
 
 class OIDCIdentityStore:
@@ -174,6 +179,11 @@ class OIDCAuthenticator:
             raise AuthorizationError("invalid_tenant", "A valid tenant selector is required.")
         try:
             signing_key = self._jwks_client.get_signing_key_from_jwt(token)
+        except PyJWKClientConnectionError as exc:
+            raise OIDCProviderUnavailable("The configured OIDC JWKS endpoint is unavailable.") from exc
+        except Exception as exc:
+            raise AuthorizationError("invalid_credential", "OIDC token verification failed.") from exc
+        try:
             claims = jwt.decode(
                 token,
                 signing_key.key,
