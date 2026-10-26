@@ -123,6 +123,41 @@ def test_concurrent_workers_do_not_claim_the_same_live_job(tmp_path):
     assert sorted(result.status for result in results) == ["idle", "succeeded"]
 
 
+
+def test_worker_heartbeat_extends_live_scheduler_lease(tmp_path):
+    tasks, _, _, scheduler = setup(tmp_path)
+    actor = principal()
+    job = scheduler.enqueue("task_sched_01", principal=actor, now_epoch=200)
+    now = int(time.time())
+    with tasks._connection() as connection:
+        connection.execute(
+            """UPDATE cmx_scheduler_jobs SET status='running', lease_owner=?,
+               lease_until=?, fencing_token=1 WHERE job_id=?""",
+            ("heartbeat_worker", now + 4, job.job_id),
+        )
+        row = connection.execute(
+            "SELECT * FROM cmx_scheduler_jobs WHERE job_id=?", (job.job_id,)
+        ).fetchone()
+    running = scheduler._job(row)
+    stop = threading.Event()
+    lost = threading.Event()
+    heartbeat = threading.Thread(
+        target=scheduler._renew_loop,
+        args=(running, "heartbeat_worker", 6, stop, lost),
+        daemon=True,
+    )
+    heartbeat.start()
+    time.sleep(2.2)
+    stop.set()
+    heartbeat.join(timeout=2)
+    with tasks._connection() as connection:
+        renewed = connection.execute(
+            "SELECT lease_until FROM cmx_scheduler_jobs WHERE job_id=?", (job.job_id,)
+        ).fetchone()["lease_until"]
+    assert not heartbeat.is_alive()
+    assert not lost.is_set()
+    assert renewed > now + 4
+
 def test_failed_or_blocked_job_requires_operator_intervention_before_requeue(tmp_path):
     _, tasks_workflow, coordinator, scheduler = setup(tmp_path)
     actor = principal()
