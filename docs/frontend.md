@@ -20,7 +20,7 @@ The frontend in `web/` is a responsive presentation layer for the decision-evalu
 - `GET /api/v1` — API metadata.
 - `POST /api/v1/assessments/evaluate` — decision evaluation. Requires an authorized bearer credential with `assessment:write`.
 
-The browser asks for the bearer credential only when the user submits an assessment. It sends the credential in the request header and does not write it to local storage, session storage, cookies, or the assessment history. Browser session history itself is held in memory and is lost on reload.
+The assessment form accepts the bearer credential in a password field with autocomplete disabled. It sends the credential only in the evaluation request header and clears the field after submission; it is not written to local storage, session storage, cookies, or assessment history. Browser session history itself is held in memory and is lost on reload.
 
 ## Explicit limitations
 
@@ -30,4 +30,4 @@ The documented match score is weighted coverage of explicit requirement keys; it
 
 ## Verification
 
-The GitHub Actions workflow runs `node --check web/app.js`, Python compilation, the automated test suite, and API/static-asset compatibility tests in `tests/test_frontend.py`. Static API/frontend compatibility tests and JavaScript syntax checks run in CI. Navigation exposes the active view to assistive technology, the mobile menu reports its expanded state and supports Escape-to-close, page navigation respects the reduced-motion preference, candidate form controls have programmatic labels, cost fields reject negative values through native constraints, and keyboard focus receives a visible indicator. Import validation limits file size and record counts, but imported files should still be treated as untrusted input. Visual cross-browser checks, keyboard/screen-reader review, browser end-to-end tests, and production deployment checks remain separate release activities.
+The GitHub Actions workflow runs `node --check web/app.js`, Python compilation, the automated test suite, and API/static-asset compatibility tests in `tests/test_frontend.py`. Static API/frontend compatibility tests and JavaScript syntax checks run in CI. Navigation exposes the active view to assistive technology, the mobile menu reports its expanded state and supports Escape-to-close, page navigation respects the reduced-motion preference, candidate form controls have programmatic labels, cost fields reject negative values through native constraints, the bearer credential uses a labeled password field and is cleared after submission, and keyboard focus receives a visible indicator. Import validation limits file size and record counts, but imported files should still be treated as untrusted input. Visual cross-browser checks, keyboard/screen-reader review, browser end-to-end tests, and production deployment checks remain separate release activities.
