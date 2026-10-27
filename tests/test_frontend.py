@@ -87,3 +87,15 @@ def test_candidate_fields_have_accessible_labels_and_nonnegative_costs():
         'min="0" step="any"',
     ):
         assert expected in script.text
+
+
+def test_assessment_uses_an_accessible_ephemeral_credential_field_not_a_prompt():
+    client = TestClient(app)
+    page = client.get("/")
+    script = client.get("/app.js")
+    assert page.status_code == 200
+    assert 'id="api-token" name="api-token" type="password" autocomplete="off"' in page.text
+    assert 'aria-describedby="api-token-help"' in page.text
+    assert '$("#api-token").value' in script.text
+    assert '$("#api-token").value=""' in script.text
+    assert "prompt(" not in script.text
