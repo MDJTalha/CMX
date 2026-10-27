@@ -99,3 +99,14 @@ def test_assessment_uses_an_accessible_ephemeral_credential_field_not_a_prompt()
     assert '$("#api-token").value' in script.text
     assert '$("#api-token").value=""' in script.text
     assert "prompt(" not in script.text
+
+
+def test_imported_session_counts_and_nested_records_are_validated_before_rendering():
+    client = TestClient(app)
+    script = client.get("/app.js")
+    assert script.status_code == 200
+    assert "function safeCount(v)" in script.text
+    assert "safeCount(x.result.evaluated_count)" in script.text
+    assert "Number.isSafeInteger(x.result.evaluated_count)" in script.text
+    assert "x.result.evaluations.every(v=>v&&typeof v===\"object\"&&!Array.isArray(v))" in script.text
+    assert "x.request.candidates.every(v=>v&&typeof v===\"object\"&&!Array.isArray(v))" in script.text
