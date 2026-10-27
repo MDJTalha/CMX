@@ -249,6 +249,20 @@ class SQLiteRetryAuthorizationStore:
                 if (row["operation_id"] != operation_id or row["idempotency_key"] != idempotency_key
                         or row["request_hash"] != request_hash or row["evidence_ref"] != evidence_ref):
                     raise RetryAuthorizationError("Recovery authorization binding does not match this operation and evidence.")
+                # Revalidate the operation in the same transaction that consumes the ticket.
+                # An approval issued while the operation was uncertain must not remain usable
+                # after another actor resolves it or changes its durable binding.
+                durable = connection.execute(
+                    """SELECT operation_id, request_hash, state FROM cmx_idempotency_operations
+                       WHERE tenant_id=? AND idempotency_key=?""",
+                    (executor.tenant_id, idempotency_key),
+                ).fetchone()
+                if (durable is None or durable["operation_id"] != operation_id
+                        or durable["request_hash"] != request_hash
+                        or durable["state"] not in {"dispatching", "uncertain"}):
+                    raise RetryAuthorizationError(
+                        "The durable operation changed or is no longer eligible for recovery."
+                    )
                 updated = connection.execute(
                     """UPDATE cmx_retry_authorizations SET consumed_at=?, executor_id=?
                        WHERE authorization_id=? AND consumed_at IS NULL AND expires_at>?""",
@@ -273,3 +287,113 @@ class SQLiteRetryAuthorizationStore:
             approver_id=row["approver_id"], executor_id=executor.subject_id,
             issued_at=row["issued_at"], expires_at=row["expires_at"], consumed_at=now,
         )
+
+    def consume_and_claim_recovery(
+        self, token: str, *, operation_id: str, idempotency_key: str,
+        request_hash: str, evidence_ref: str, principal: PrincipalContext,
+        now_epoch: int | None = None,
+    ) -> tuple[ConsumedRetryAuthorization, IdempotencyRecord]:
+        """Atomically consume a reviewed ticket and claim an uncertain operation.
+
+        This is a durable claim, not a provider dispatch. The single SQLite
+        transaction prevents ticket consumption without the matching state
+        transition and prevents two workers from claiming the same operation.
+        """
+        now = _timestamp(now_epoch)
+        executor = self._authorize(principal, "workflow:execute", now)
+        if not isinstance(token, str) or not 32 <= len(token) <= 128:
+            raise RetryAuthorizationError("Recovery authorization token is invalid.")
+        if not isinstance(operation_id, str) or not operation_id or len(operation_id) > 256:
+            raise ValueError("operation_id is invalid.")
+        for value, label in ((idempotency_key, "idempotency_key"), (request_hash, "request_hash")):
+            if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                raise ValueError(f"{label} must be a lowercase SHA-256 digest.")
+        if not isinstance(evidence_ref, str) or not evidence_ref or len(evidence_ref) > 512:
+            raise ValueError("evidence_ref is invalid.")
+
+        with self.task_store._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                ticket = connection.execute(
+                    "SELECT * FROM cmx_retry_authorizations WHERE tenant_id=? AND token_hash=?",
+                    (executor.tenant_id, _digest(token)),
+                ).fetchone()
+                if ticket is None:
+                    raise RetryAuthorizationError("Recovery authorization was not found in this tenant.")
+                if ticket["consumed_at"] is not None:
+                    raise RetryAuthorizationError("Recovery authorization has already been consumed.")
+                if now >= ticket["expires_at"]:
+                    raise RetryAuthorizationError("Recovery authorization has expired.")
+                if ticket["approver_id"] == executor.subject_id:
+                    raise RetryAuthorizationError("The approver and executor must be different identities.")
+                if (ticket["operation_id"] != operation_id
+                        or ticket["idempotency_key"] != idempotency_key
+                        or ticket["request_hash"] != request_hash
+                        or ticket["evidence_ref"] != evidence_ref):
+                    raise RetryAuthorizationError("Recovery authorization binding does not match this operation and evidence.")
+
+                durable = connection.execute(
+                    """SELECT * FROM cmx_idempotency_operations
+                       WHERE tenant_id=? AND idempotency_key=?""",
+                    (executor.tenant_id, idempotency_key),
+                ).fetchone()
+                if (durable is None or durable["operation_id"] != operation_id
+                        or durable["request_hash"] != request_hash or durable["state"] != "uncertain"):
+                    raise RetryAuthorizationError(
+                        "Recovery claim requires the matching durable operation to be uncertain."
+                    )
+
+                updated = connection.execute(
+                    """UPDATE cmx_retry_authorizations SET consumed_at=?, executor_id=?
+                       WHERE authorization_id=? AND consumed_at IS NULL AND expires_at>?""",
+                    (now, executor.subject_id, ticket["authorization_id"], now),
+                )
+                if updated.rowcount != 1:
+                    raise RetryAuthorizationError("Recovery authorization was concurrently consumed or expired.")
+
+                changed = connection.execute(
+                    """UPDATE cmx_idempotency_operations
+                       SET state='dispatching', result_json=NULL, updated_at=?
+                       WHERE tenant_id=? AND idempotency_key=? AND operation_id=?
+                         AND request_hash=? AND state='uncertain'""",
+                    (now, executor.tenant_id, idempotency_key, operation_id, request_hash),
+                )
+                if changed.rowcount != 1:
+                    raise RetryAuthorizationError("Recovery operation was concurrently claimed.")
+
+                self._append_event(
+                    connection, authorization_id=ticket["authorization_id"],
+                    actor_id=executor.subject_id, event_type="retry_authorization.consumed",
+                    occurred_at=now,
+                    payload={"operation_id": operation_id, "idempotency_key": idempotency_key,
+                             "request_hash": request_hash, "evidence_ref": evidence_ref,
+                             "claim_state": "dispatching"},
+                )
+                self.idempotency_store._append_event(
+                    connection, tenant_id=executor.tenant_id, key=idempotency_key,
+                    actor_id=executor.subject_id, event_type="operation.recovery_dispatch_claimed",
+                    occurred_at=now,
+                    payload={"operation_id": operation_id, "from_state": "uncertain",
+                             "to_state": "dispatching", "authorization_id": ticket["authorization_id"],
+                             "evidence_ref": evidence_ref},
+                )
+                updated_row = connection.execute(
+                    """SELECT * FROM cmx_idempotency_operations
+                       WHERE tenant_id=? AND idempotency_key=?""",
+                    (executor.tenant_id, idempotency_key),
+                ).fetchone()
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+        consumed = ConsumedRetryAuthorization(
+            authorization_id=ticket["authorization_id"], tenant_id=ticket["tenant_id"],
+            operation_id=ticket["operation_id"], idempotency_key=ticket["idempotency_key"],
+            request_hash=ticket["request_hash"], evidence_ref=ticket["evidence_ref"],
+            approver_id=ticket["approver_id"], executor_id=executor.subject_id,
+            issued_at=ticket["issued_at"], expires_at=ticket["expires_at"], consumed_at=now,
+        )
+        return consumed, self.idempotency_store._record(updated_row)
+

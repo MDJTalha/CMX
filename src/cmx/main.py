@@ -5,13 +5,17 @@ from __future__ import annotations
 import os
 import sqlite3
 from functools import lru_cache
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from cmx import __version__
 from cmx.engine import evaluate_decision
 from cmx.models import DecisionRequest, DecisionResponse
+from cmx.oidc_auth import OIDCAuthenticator, OIDCIdentityStore, OIDCProviderUnavailable
 from cmx.security import AuthorizationError, PrincipalContext, authorize_permissions
 from cmx.service_auth import (
     CredentialStoreIntegrityError,
@@ -29,6 +33,19 @@ def _credential_store_for_path(database_path: str) -> SQLiteCredentialStore:
     return SQLiteCredentialStore(database_path)
 
 
+@lru_cache(maxsize=8)
+def _oidc_authenticator_for_config(
+    issuer: str, audience: str, jwks_url: str, database_path: str,
+    require_mfa: bool, mfa_acr: str | None,
+) -> OIDCAuthenticator:
+    """Cache a verifier/JWKS client for each immutable configuration."""
+    return OIDCAuthenticator(
+        issuer=issuer, audience=audience, jwks_url=jwks_url,
+        identity_store=OIDCIdentityStore(database_path),
+        require_mfa=require_mfa, mfa_acr=mfa_acr,
+    )
+
+
 app = FastAPI(
     title="CMX Decision Engine",
     summary="Evidence-aware decision support for Customer & Market Experience.",
@@ -44,14 +61,50 @@ app = FastAPI(
 
 def require_service_principal(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    tenant_id: str | None = Header(default=None, alias="X-CMX-Tenant"),
 ) -> PrincipalContext:
-    """Authenticate a bearer key using server-side records; never trust client claims."""
+    """Authenticate using the explicitly configured service-key or OIDC mode."""
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=401,
-            detail="A valid CMX service credential is required.",
+            detail="A valid CMX bearer credential is required.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    auth_mode = os.environ.get("CMX_AUTH_MODE", "service").strip().lower()
+    if auth_mode == "oidc":
+        issuer = os.environ.get("CMX_OIDC_ISSUER", "")
+        audience = os.environ.get("CMX_OIDC_AUDIENCE", "")
+        jwks_url = os.environ.get("CMX_OIDC_JWKS_URL", "")
+        database_path = os.environ.get("CMX_OIDC_DB_PATH", "data/cmx-oidc.sqlite3")
+        require_mfa = os.environ.get("CMX_OIDC_REQUIRE_MFA", "false").strip().lower() in {"1", "true", "yes"}
+        mfa_acr = os.environ.get("CMX_OIDC_MFA_ACR") or None
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="X-CMX-Tenant is required in OIDC mode.")
+        try:
+            authenticator = _oidc_authenticator_for_config(
+                issuer, audience, jwks_url, database_path, require_mfa, mfa_acr,
+            )
+            return authenticator.authenticate(credentials.credentials, tenant_id=tenant_id)
+        except AuthorizationError as exc:
+            status_code = 403 if exc.code in {"membership_required", "mfa_required"} else 401
+            raise HTTPException(
+                status_code=status_code,
+                detail="The OIDC identity could not be authenticated or authorized.",
+                headers={"WWW-Authenticate": "Bearer"} if status_code == 401 else None,
+            ) from exc
+        except OIDCProviderUnavailable as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="The configured identity provider is temporarily unavailable.",
+            ) from exc
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="OIDC authentication is not correctly configured or is temporarily unavailable.",
+            ) from exc
+    if auth_mode != "service":
+        raise HTTPException(status_code=503, detail="CMX_AUTH_MODE must be 'service' or 'oidc'.")
 
     database_path = os.environ.get("CMX_AUTH_DB_PATH", _AUTH_DATABASE_DEFAULT)
     try:
@@ -128,6 +181,12 @@ def evaluate_assessment(
         return evaluate_decision(request)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+_WEB_DIRECTORY = Path(__file__).resolve().parents[2] / "web"
+if _WEB_DIRECTORY.is_dir():
+    # The frontend is a presentation layer; assessment authorization remains server-enforced.
+    app.mount("/", StaticFiles(directory=str(_WEB_DIRECTORY), html=True), name="frontend")
 
 
 def run() -> None:
