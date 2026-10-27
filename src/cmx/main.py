@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 import sqlite3
 from functools import lru_cache
+from pathlib import Path
+
+from fastapi.staticfiles import StaticFiles
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -178,6 +181,12 @@ def evaluate_assessment(
         return evaluate_decision(request)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+_WEB_DIRECTORY = Path(__file__).resolve().parents[2] / "web"
+if _WEB_DIRECTORY.is_dir():
+    # The frontend is a presentation layer; assessment authorization remains server-enforced.
+    app.mount("/", StaticFiles(directory=str(_WEB_DIRECTORY), html=True), name="frontend")
 
 
 def run() -> None:

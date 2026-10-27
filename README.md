@@ -101,3 +101,8 @@ CMX records operator reconciliation reviews for interrupted workflow steps and s
 A separate transactional consumption operation can mark an authorization as consumed once. It rejects stale reviews, mismatched workflow evidence, active leases, exhausted attempts, and duplicate consumption. Both authorization and consumption are recorded in the workflow audit chain.
 
 **Safety boundary:** authorization and consumption are not execution. Neither operation resets the interrupted step, claims a worker lease, invokes a handler, or starts a retry. A safe retry executor with external-side-effect idempotency, crash recovery, and provider-specific reconciliation is not yet implemented. Never treat an authorization or consumption event as permission to replay a handler automatically.
+
+
+### Web frontend
+
+CMX now includes a responsive browser interface served by the FastAPI application at `/`. It provides an overview, assessment builder, explainable decision report, session-only history and trust/evidence guidance. Run the API as documented above and open its root URL in a browser. Evaluation still requires an authorized bearer credential; the current UI does not implement browser login or server-persisted assessment history. See [frontend documentation](docs/frontend.md) for the API contract, security boundary and limitations.

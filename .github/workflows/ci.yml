@@ -22,9 +22,32 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - name: Set up Node.js for frontend syntax validation
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate frontend JavaScript syntax
+        run: node --check web/app.js
       - name: Install project and development dependencies
         run: python -m pip install -e ".[dev]"
       - name: Compile source and tests
         run: python -m compileall -q src tests
       - name: Run automated tests
         run: python -m pytest
+      - name: Install browser test dependencies
+        run: |
+          npm install --no-save playwright axe-core
+          npx playwright install --with-deps chromium
+      - name: Start API for browser tests
+        run: |
+          nohup python -m uvicorn cmx.main:app --host 127.0.0.1 --port 8000 --app-dir src > /tmp/cmx-uvicorn.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/cmx-uvicorn.log
+          exit 1
+      - name: Run frontend browser smoke tests
+        run: node tests/e2e_frontend.cjs
