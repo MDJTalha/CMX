@@ -16,6 +16,8 @@ const assert = require("node:assert/strict");
     for (const view of views) {
       await page.locator(`.nav [data-view="${view.key}"]`).click();
       await page.locator(`#view-${view.key}`).waitFor({ state: "visible" });
+      assert.equal(await page.locator(`.nav [data-view="${view.key}"]`).getAttribute("aria-current"), "page", `Active navigation item exposes current page for ${view.key}`);
+      assert.equal(await page.locator(`.nav [data-view="${view.key}"]`).evaluate(node => node.classList.contains("active")), true, `Active navigation styling matches ${view.key}`);
       const audit = await page.evaluate(async () => window.axe.run(document.querySelector(".main"), { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] } }));
       accessibilityFindings.push(...audit.violations.filter(item => ["critical", "serious"].includes(item.impact)).map(item => ({ view: view.key, id: item.id, impact: item.impact, description: item.description, nodes: item.nodes.map(node => node.target) })));
     }
@@ -43,9 +45,11 @@ const assert = require("node:assert/strict");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator("#mobile-menu").click();
     assert.equal(await page.locator("#mobile-menu").getAttribute("aria-expanded"), "true");
+    assert.equal(await page.locator(".nav-link:focus").count(), 1, "Opening the mobile menu moves focus into navigation");
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("#mobile-menu").getAttribute("aria-expanded"), "false");
     assert.equal(await page.locator("#sidebar").evaluate(node => node.classList.contains("open")), false);
+    assert.equal(await page.evaluate(() => document.activeElement.id), "mobile-menu", "Escape restores focus to the mobile menu button");
     assert.deepEqual(errors, []);
     console.log("Frontend browser smoke tests passed: navigation, dynamic forms, mobile menu, Escape handling, and no uncaught page errors.");
   } finally {
