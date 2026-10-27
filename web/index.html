@@ -22,6 +22,9 @@
         <a class="nav-link active" href="#overview" data-view="overview"><span class="nav-icon">▦</span>Overview</a>
         <a class="nav-link" href="#assessment" data-view="assessment"><span class="nav-icon">✳</span>New assessment</a>
         <a class="nav-link" href="#history" data-view="history"><span class="nav-icon">◷</span>Session history</a>
+        <a class="nav-link" href="#library" data-view="library"><span class="nav-icon">▤</span>Option library</a>
+        <a class="nav-link" href="#templates" data-view="templates"><span class="nav-icon">▧</span>Templates</a>
+        <a class="nav-link" href="#settings" data-view="settings"><span class="nav-icon">⚙</span>Workspace settings</a>
         <a class="nav-link" href="#trust" data-view="trust"><span class="nav-icon">◇</span>Trust & evidence</a>
       </nav>
       <div class="sidebar-bottom">
@@ -123,6 +126,27 @@
         <article class="panel api-details"><div class="panel-heading"><div><div class="eyebrow">LIVE SERVICE</div><h2>API connection</h2></div><button class="button secondary small-button" id="trust-refresh">Check again</button></div><dl><div><dt>Service</dt><dd id="trust-service">Checking…</dd></div><div><dt>Version</dt><dd id="trust-version">—</dd></div><div><dt>Health endpoint</dt><dd><code>/health</code></dd></div><div><dt>Evaluation endpoint</dt><dd><code>POST /api/v1/assessments/evaluate</code></dd></div><div><dt>Authentication</dt><dd>Bearer credential · assessment:write</dd></div></dl></article>
       </section>
 
+      <section class="view" id="view-library" data-title="Option library">
+        <div class="page-heading"><div><div class="eyebrow">REUSABLE INPUTS</div><h1>Option library</h1><p class="subheading">Review candidate options from completed assessments in this browser session. This is not a shared or server-backed catalogue.</p></div><button class="button primary" data-go="assessment">＋ Add in assessment</button></div>
+        <div class="panel history-panel"><div class="table-toolbar"><div><h2>Candidate options</h2><p>Options are listed from in-memory session records; reloading clears this list.</p></div><span class="count-pill" id="library-count">0 options</span></div><div id="library-table"></div></div>
+      </section>
+      <section class="view" id="view-templates" data-title="Assessment templates">
+        <div class="page-heading"><div><div class="eyebrow">STANDARDIZE YOUR PROCESS</div><h1>Assessment templates</h1><p class="subheading">Start from a sample framework, then tailor the requirements to your actual decision.</p></div></div>
+        <div class="trust-grid">
+          <article class="panel trust-card"><span class="trust-icon">◈</span><h2>Software selection</h2><p>Compare operational fit, access controls, reporting, integrations and total first-year cost.</p><button class="button secondary small-button" data-template="software">Use framework</button></article>
+          <article class="panel trust-card"><span class="trust-icon">⌘</span><h2>Service provider</h2><p>Compare service coverage, response commitments, geographic reach and evidence quality.</p><button class="button secondary small-button" data-template="service">Use framework</button></article>
+          <article class="panel trust-card"><span class="trust-icon">◎</span><h2>Process improvement</h2><p>Compare control requirements, measurable outcomes, adoption effort and implementation cost.</p><button class="button secondary small-button" data-template="process">Use framework</button></article>
+        </div>
+        <div class="notice" style="background:#f0efff;color:#57517f;border:1px solid #e3e1ff">Templates populate a new browser-side assessment draft. They do not represent industry-certified checklists and must be reviewed for your context.</div>
+      </section>
+      <section class="view" id="view-settings" data-title="Workspace settings">
+        <div class="page-heading"><div><div class="eyebrow">WORKSPACE CONTROLS</div><h1>Settings</h1><p class="subheading">Review this browser interface's current behavior and service connection.</p></div></div>
+        <div class="content-grid">
+          <article class="panel"><div class="panel-heading"><div><div class="eyebrow">CONNECTION</div><h2>CMX API</h2></div><span class="status-label" id="settings-api-state">Checking</span></div><p class="panel-description">The interface uses same-origin API routes. Authentication and permission checks are enforced by the server.</p><dl class="settings-list"><div><dt>Health</dt><dd><code>/health</code></dd></div><div><dt>Metadata</dt><dd><code>/api/v1</code></dd></div><div><dt>Evaluate</dt><dd><code>POST /api/v1/assessments/evaluate</code></dd></div><div><dt>Credential storage</dt><dd>Not stored by the frontend</dd></div></dl><button class="button secondary" id="settings-refresh">Refresh connection</button></article>
+          <article class="panel"><div class="eyebrow">DATA & PRIVACY</div><h2 style="font:700 16px Manrope;margin:7px 0 12px">Browser session data</h2><p class="panel-description">Completed reports and draft inputs live in memory only. Reloading the page clears them. No browser storage is used for bearer credentials.</p><div class="settings-actions"><button class="button secondary" id="export-session">Export session data</button><button class="button secondary" id="import-session">Import session JSON</button><button class="button secondary" id="clear-session">Clear session history</button><input class="hidden" id="session-file" type="file" accept="application/json,.json"></div><div id="settings-message" class="muted" role="status" style="margin-top:12px"></div></article>
+        </div>
+        <article class="panel api-details"><div class="eyebrow">RELEASE READINESS</div><h2 style="font:700 16px Manrope;margin:7px 0 12px">Not configurable from this UI</h2><p class="panel-description">Identity provider settings, tenant membership, role administration, evidence source integrations, retention policies and server persistence must be configured and secured through dedicated backend capabilities. This page does not simulate those controls.</p></article>
+      </section>
       <section class="view" id="view-results" data-title="Assessment results">
         <div class="page-heading"><div><div class="eyebrow">ASSESSMENT REPORT</div><h1>Decision report</h1><p class="subheading" id="result-subtitle">Results from the CMX decision engine.</p></div><div class="heading-actions"><button class="button secondary" id="export-result">Export report</button><button class="button primary" data-go="assessment">＋ New assessment</button></div></div>
         <div id="results-content"></div>
