@@ -194,7 +194,7 @@ byId("assessment-form").addEventListener("submit", async (event) => {
   } catch (error) {
     summary.querySelector("strong").textContent = "Could not reach the API";
     summary.querySelector("p").textContent = error.message + " Check the API URL, server status, and CORS configuration.";
-    formStatus.textContent = "Request failed; no result was generated.";
+    formStatus.textContent = error.message + " No result was generated. Check the API URL, server status, and CORS configuration.";
   } finally { button.disabled = false; }
 });
 byId("assessment-form").addEventListener("reset", () => {
