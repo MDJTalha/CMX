@@ -42,15 +42,16 @@ byId("assessment-form").addEventListener("submit", async (event) => {
   try {
     const problem = byId("problem").value.trim();
     const outcome = byId("outcome").value.trim();
-    if (!problem || !outcome) throw new Error("Enter both the problem and desired outcome.");
+    if (problem.length < 10) throw new Error("Problem statement must be at least 10 characters.");
+    if (outcome.length < 3 || outcome.length > 1000) throw new Error("Desired outcome must be between 3 and 1,000 characters.");
     const requirements = parseArray("requirements", "Requirements");
     const candidates = parseArray("candidates", "Candidates");
-    body = { problem_statement: problem, desired_outcome: outcome, target_region: byId("region").value.trim() || null, requirements, candidates };
+    body = { problem_statement: problem, desired_outcome: outcome, region: byId("region").value.trim() || "global", requirements, candidates };
     const budget = byId("budget").value.trim();
     if (budget !== "") {
       const amount = Number(budget);
       if (!Number.isFinite(amount) || amount < 0) throw new Error("Budget must be a non-negative number.");
-      body.first_year_budget_usd = amount;
+      body.max_first_year_cost_usd = amount;
     }
   } catch (error) {
     formStatus.textContent = error.message;
