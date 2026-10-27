@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from cmx.assessment_templates import validate_template_reference
+
 
 SCHEMA_VERSION = 1
 MAX_RECORD_BYTES = 1_000_000
@@ -123,6 +125,8 @@ class SQLiteAssessmentStore:
         self._validate_identity(template_id, "template_id")
         if not isinstance(template_version, int) or isinstance(template_version, bool) or template_version < 1:
             raise ValueError("template_version must be a positive integer")
+        if not validate_template_reference(template_id, template_version):
+            raise ValueError("template_id/template_version is not a supported template version")
         request_json, response_json = _canonical(request), _canonical(response)
         if len(request_json.encode("utf-8")) + len(response_json.encode("utf-8")) > MAX_RECORD_BYTES:
             raise ValueError("Assessment snapshot exceeds the 1 MB limit")
