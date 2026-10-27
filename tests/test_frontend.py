@@ -80,7 +80,7 @@ def test_candidate_fields_have_accessible_labels_and_nonnegative_costs():
     script = client.get("/app.js")
     assert script.status_code == 200
     for expected in (
-        'for="candidate-'+id+'-'+name+'"',
+        "for=\"candidate-'+id+'-'+name+'\"",
         'aria-label="Supported capability keys"',
         'aria-label="Evidence source URLs (comma separated)"',
         'min="0" step="any"',
