@@ -129,7 +129,7 @@ const assert = require("node:assert/strict");
     await page.locator('.nav [data-view="history"]').click();
     await page.locator("#history-table").getByText("Choose a secure support platform", { exact: true }).waitFor({ state: "visible" });
     await page.locator('.nav [data-view="library"]').click();
-    await page.getByText("Example option", { exact: true }).waitFor({ state: "visible" });
+    await page.locator("#library-table").getByText("Example option", { exact: true }).waitFor({ state: "visible" });
 
     // Reopening an imported report must still allow report export.
     await page.locator('.nav [data-view="history"]').click();
