@@ -1,6 +1,20 @@
 "use strict";
 const byId = (id) => document.getElementById(id);
-const apiBase = () => byId("api-base").value.trim().replace(/\/+$/, "");
+const apiBase = ({ requiresCredential = false } = {}) => {
+  const raw = byId("api-base").value.trim();
+  if (!raw) throw new Error("Enter the CMX API base URL.");
+  let parsed;
+  try { parsed = new URL(raw); }
+  catch { throw new Error("API base URL must be an absolute HTTP(S) URL."); }
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error("API base URL must use HTTP(S) and must not contain credentials, a query string, or a fragment.");
+  }
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+  if (requiresCredential && parsed.protocol !== "https:" && !loopback) {
+    throw new Error("Refusing to send a bearer credential to a non-HTTPS remote API. Use HTTPS or a loopback development address.");
+  }
+  return parsed.href.replace(/\\/+$/, "");
+};
 // Credentials exist only in these in-memory variables; never write them to storage.
 let bearerCredential = "";
 let tenantId = "";
@@ -25,7 +39,7 @@ const status = (title, detail, kind = "") => {
   byId("connection-dot").className = "status-dot" + (kind ? " " + kind : "");
 };
 byId("api-docs-link").addEventListener("click", (event) => {
-  const base = apiBase();
+  let base;\n  try { base = apiBase(); } catch (error) { event.preventDefault(); byId("form-status").textContent = error.message; return; }
   if (!base) { event.preventDefault(); return; }
   event.currentTarget.href = base + "/docs";
 });
@@ -155,7 +169,7 @@ byId("assessment-form").addEventListener("submit", async (event) => {
   summary.querySelector("strong").textContent = "Evaluation in progress";
   summary.querySelector("p").textContent = "Waiting for the CMX API. No vendor claims are being independently verified.";
   try {
-    const response = await fetch(apiBase() + "/api/v1/assessments/evaluate", {
+    const response = await fetch(apiBase({ requiresCredential: Boolean(bearerCredential) }) + "/api/v1/assessments/evaluate", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify(body)
