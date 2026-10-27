@@ -168,7 +168,7 @@ byId("assessment-form").addEventListener("submit", async (event) => {
       result.hidden = false;
       summary.hidden = true;
       formStatus.textContent = response.status === 401 || response.status === 403
-        ? "Authentication or permission required. This starter does not collect or store bearer tokens."
+        ? "Authentication or permission required. Check the server-issued bearer credential and required permission."
         : "API rejected the request. Review the response details.";
       return;
     }
