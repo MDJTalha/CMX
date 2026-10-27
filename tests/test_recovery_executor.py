@@ -219,7 +219,7 @@ def test_provider_identity_mismatch_blocks_dispatch_and_preserves_ticket(tmp_pat
         update={"provider_id": "untrusted_provider"}
     )
 
-    with pytest.raises(RecoveryExecutionError, match="manual_review"):
+    with pytest.raises(RecoveryExecutionError, match="evidence_rejected"):
         service.execute(
             idempotency_key=key,
             request_payload=payload,
