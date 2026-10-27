@@ -62,3 +62,15 @@ def test_frontend_does_not_claim_unimplemented_discovery_or_server_persistence()
     assert page.status_code == 200
     assert "does not discover or independently verify vendors" in page.text
     assert "server-persisted assessment history" in documentation.read_text(encoding="utf-8")
+
+def test_frontend_navigation_exposes_accessible_current_and_mobile_state():
+    client = TestClient(app)
+    page = client.get("/")
+    script = client.get("/app.js")
+    assert page.status_code == 200
+    assert 'aria-controls="sidebar"' in page.text
+    assert 'aria-expanded="false"' in page.text
+    assert script.status_code == 200
+    assert 'setAttribute("aria-current","page")' in script.text
+    assert 'e.key==="Escape"' in script.text
+    assert 'prefers-reduced-motion: reduce' in script.text
