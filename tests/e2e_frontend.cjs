@@ -11,10 +11,17 @@ const assert = require("node:assert/strict");
     await page.goto("http://127.0.0.1:8000/", { waitUntil: "networkidle" });
     await assert.doesNotReject(() => page.locator("#view-overview").waitFor({ state: "visible" }));
     await page.addScriptTag({ content: axeSource });
-    const audit = await page.evaluate(async () => window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] } }));
-    const serious = audit.violations.filter(item => ["critical", "serious"].includes(item.impact));
-    if (serious.length) console.error("Accessibility violations:", JSON.stringify(serious.map(item => ({ id: item.id, impact: item.impact, description: item.description, nodes: item.nodes.map(node => node.target) }))));
-    assert.equal(serious.length, 0, "No critical or serious WCAG 2.1 A/AA violations on overview");
+    const views = await page.locator(".nav [data-view]").evaluateAll(nodes => nodes.map(node => ({ key: node.dataset.view, label: node.textContent.trim() })));
+    const accessibilityFindings = [];
+    for (const view of views) {
+      await page.locator(`.nav [data-view="${view.key}"]`).click();
+      await page.locator(`#view-${view.key}`).waitFor({ state: "visible" });
+      const audit = await page.evaluate(async () => window.axe.run(document.querySelector(".main"), { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] } }));
+      accessibilityFindings.push(...audit.violations.filter(item => ["critical", "serious"].includes(item.impact)).map(item => ({ view: view.key, id: item.id, impact: item.impact, description: item.description, nodes: item.nodes.map(node => node.target) })));
+    }
+    if (accessibilityFindings.length) console.error("Accessibility violations:", JSON.stringify(accessibilityFindings));
+    assert.equal(accessibilityFindings.length, 0, "No critical or serious WCAG 2.1 A/AA violations across frontend views");
+    await page.locator('.nav [data-view="overview"]').click();
     await page.getByRole("link", { name: /New assessment/ }).click();
     await page.locator("#view-assessment").waitFor({ state: "visible" });
     const requirementsBefore = await page.locator("#requirements-list .dynamic-row").count();
