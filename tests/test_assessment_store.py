@@ -13,8 +13,8 @@ from cmx.assessment_store import (
 def snapshot(store, tenant="tenant_alpha"):
     return store.create(
         tenant_id=tenant,
-        template_id="sme-workflow",
-        template_version=2,
+        template_id="sme-back-office-workflow",
+        template_version=1,
         request={"problem_statement": "Reduce manual processing", "requirements": [{"key": "audit_log"}]},
         response={"status": "validation_needed", "score": 0.5},
     )
@@ -26,8 +26,8 @@ def test_assessment_is_durable_and_versioned_across_reopen(tmp_path):
     reopened = SQLiteAssessmentStore(path)
     loaded = reopened.get(tenant_id="tenant_alpha", assessment_id=created["assessment_id"])
     assert loaded == created
-    assert loaded["template_id"] == "sme-workflow"
-    assert loaded["template_version"] == 2
+    assert loaded["template_id"] == "sme-back-office-workflow"
+    assert loaded["template_version"] == 1
     assert reopened.verify(loaded)
 
 
@@ -145,3 +145,13 @@ def test_file_backed_store_and_bounded_list_limit_are_required(tmp_path):
     store = SQLiteAssessmentStore(tmp_path / "assessments.sqlite3")
     with pytest.raises(ValueError, match="between 1 and"):
         store.list(tenant_id="tenant_alpha", limit=101)
+
+
+
+def test_store_rejects_unknown_template_versions(tmp_path):
+    store = SQLiteAssessmentStore(tmp_path / "assessments.sqlite3")
+    with pytest.raises(ValueError, match="supported template version"):
+        store.create(
+            tenant_id="tenant_alpha", template_id="sme-back-office-workflow",
+            template_version=99, request={"problem": "test"}, response={"status": "unknown"},
+        )
