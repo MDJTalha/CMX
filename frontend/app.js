@@ -39,7 +39,8 @@ const status = (title, detail, kind = "") => {
   byId("connection-dot").className = "status-dot" + (kind ? " " + kind : "");
 };
 byId("api-docs-link").addEventListener("click", (event) => {
-  let base;\n  try { base = apiBase(); } catch (error) { event.preventDefault(); byId("form-status").textContent = error.message; return; }
+  let base;
+  try { base = apiBase(); } catch (error) { event.preventDefault(); byId("form-status").textContent = error.message; return; }
   if (!base) { event.preventDefault(); return; }
   event.currentTarget.href = base + "/docs";
 });
