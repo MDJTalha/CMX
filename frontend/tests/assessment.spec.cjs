@@ -48,7 +48,7 @@ test("sends a transient bearer token and renders evidence review safely", async 
   await page.getByRole("button", { name: "Evaluate decision" }).click();
 
   await expect(page.getByRole("heading", { name: "needs_review" })).toBeVisible();
-  await expect(page.getByText("Security certification not supplied")).toBeVisible();
+  await expect(page.locator(".candidate-review").getByText("Security certification not supplied", { exact: true })).toBeVisible();
   await expect(page.locator(".candidate-review h4")).toHaveText("<img src=x onerror=alert(1)>");
   await expect(page.locator(".candidate-review img")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "https://example.com/evidence" })).toHaveAttribute("rel", "noopener noreferrer");
