@@ -24,7 +24,7 @@ def test_frontend_assets_are_served():
     assert js.status_code == 200
     assert "/api/v1/assessments/evaluate" in js.text
     assert '"Authorization":"Bearer "+token.trim()' in js.text
-    assert "will not be saved" in js.text
+    assert '$("#api-token").value=""' in js.text
 
 
 def test_health_and_api_metadata_remain_available_with_frontend():
