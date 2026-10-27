@@ -20,6 +20,7 @@ def test_frontend_assets_are_served():
     js = client.get("/app.js")
     assert css.status_code == 200
     assert "prefers-reduced-motion" in css.text
+    assert ":focus-visible" in css.text
     assert js.status_code == 200
     assert "/api/v1/assessments/evaluate" in js.text
     assert '"Authorization":"Bearer "+token.trim()' in js.text
