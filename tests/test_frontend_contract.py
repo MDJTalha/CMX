@@ -39,8 +39,8 @@ class FrontendContractTests(unittest.TestCase):
         cls.document.feed(cls.html)
 
     def test_frontend_assets_are_present_and_referenced(self):
-        self.assertIn("app.js", self.document.scripts)
-        self.assertIn("styles.css", self.document.stylesheets)
+        self.assertIn("./app.js", self.document.scripts)
+        self.assertIn("./styles.css", self.document.stylesheets)
         self.assertTrue((FRONTEND / "app.js").is_file())
         self.assertTrue((FRONTEND / "styles.css").is_file())
 
