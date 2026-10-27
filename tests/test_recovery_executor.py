@@ -30,9 +30,11 @@ class FakeProvider:
 
     def __init__(self, observation):
         self.observation = observation
+        self.lookup_calls = 0
         self.executions = []
 
     def lookup(self, *, operation_id, idempotency_key):
+        self.lookup_calls += 1
         assert self.observation.operation_id == operation_id
         assert self.observation.idempotency_key == idempotency_key
         return self.observation
@@ -179,3 +181,108 @@ def test_provider_failure_returns_operation_to_uncertain_and_requires_reconcilia
     durable = ledger.get(key, principal=executor, authorization_now_epoch=202)
     assert durable.state == "uncertain"
     assert len(provider.executions) == 1
+
+
+
+def test_persisted_dispatching_state_is_treated_as_crash_window_and_never_replayed(tmp_path):
+    tasks, ledger, _, _, executor, payload, key, _, issued, provider, service = setup(tmp_path)
+
+    # Simulate a process crash after the durable dispatch claim but before the
+    # provider call. The row survives restart in dispatching state.
+    with tasks._connection() as connection:
+        connection.execute(
+            """UPDATE cmx_idempotency_operations
+               SET state = 'dispatching', updated_at = ?
+               WHERE tenant_id = ? AND idempotency_key = ?""",
+            (201, executor.tenant_id, key),
+        )
+
+    with pytest.raises(RecoveryExecutionError, match="Only an uncertain operation"):
+        service.execute(
+            idempotency_key=key,
+            request_payload=payload,
+            authorization_token=issued.token,
+            provider=provider,
+            principal=executor,
+            now_epoch=202,
+        )
+
+    durable = ledger.get(key, principal=executor, authorization_now_epoch=203)
+    assert durable.state == "dispatching"
+    assert provider.lookup_calls == 0
+    assert provider.executions == []
+
+
+def test_provider_identity_mismatch_blocks_dispatch_and_preserves_ticket(tmp_path):
+    _, _, auth, _, executor, payload, key, record, issued, provider, service = setup(tmp_path)
+    provider.observation = provider.observation.model_copy(
+        update={"provider_id": "untrusted_provider"}
+    )
+
+    with pytest.raises(RecoveryExecutionError, match="manual_review"):
+        service.execute(
+            idempotency_key=key,
+            request_payload=payload,
+            authorization_token=issued.token,
+            provider=provider,
+            principal=executor,
+            now_epoch=201,
+        )
+
+    assert provider.executions == []
+    consumed = auth.consume(
+        issued.token,
+        operation_id=record.operation_id,
+        idempotency_key=record.idempotency_key,
+        request_hash=record.request_hash,
+        evidence_ref="provider-evidence:case-123",
+        principal=executor,
+        now_epoch=202,
+    )
+    assert consumed.authorization_id == issued.authorization_id
+
+
+def test_provider_without_explicit_idempotency_support_is_never_called(tmp_path):
+    _, _, _, _, executor, payload, key, _, issued, provider, service = setup(tmp_path)
+    provider.supports_idempotency = False
+
+    with pytest.raises(RecoveryExecutionError, match="does not explicitly support"):
+        service.execute(
+            idempotency_key=key,
+            request_payload=payload,
+            authorization_token=issued.token,
+            provider=provider,
+            principal=executor,
+            now_epoch=201,
+        )
+
+    assert provider.lookup_calls == 0
+    assert provider.executions == []
+
+
+def test_stale_provider_evidence_blocks_dispatch_and_preserves_ticket(tmp_path):
+    _, _, auth, _, executor, payload, key, record, issued, provider, service = setup(tmp_path)
+    provider.observation = provider.observation.model_copy(update={"observed_at": 1})
+
+    with pytest.raises(RecoveryExecutionError, match="manual_review"):
+        service.execute(
+            idempotency_key=key,
+            request_payload=payload,
+            authorization_token=issued.token,
+            provider=provider,
+            principal=executor,
+            now_epoch=201,
+            max_evidence_age_seconds=30,
+        )
+
+    assert provider.executions == []
+    consumed = auth.consume(
+        issued.token,
+        operation_id=record.operation_id,
+        idempotency_key=record.idempotency_key,
+        request_hash=record.request_hash,
+        evidence_ref="provider-evidence:case-123",
+        principal=executor,
+        now_epoch=202,
+    )
+    assert consumed.authorization_id == issued.authorization_id
