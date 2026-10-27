@@ -6,10 +6,11 @@ import os
 import sqlite3
 from functools import lru_cache
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from cmx import __version__
+from cmx.assessment_store import AssessmentIntegrityError, SQLiteAssessmentStore
 from cmx.engine import evaluate_decision
 from cmx.models import DecisionRequest, DecisionResponse
 from cmx.oidc_auth import OIDCAuthenticator, OIDCIdentityStore, OIDCProviderUnavailable
@@ -22,6 +23,17 @@ from cmx.service_auth import (
 
 _bearer_scheme = HTTPBearer(auto_error=False, scheme_name="CMXServiceBearer")
 _AUTH_DATABASE_DEFAULT = "data/cmx-auth.sqlite3"
+_ASSESSMENT_DATABASE_DEFAULT = "data/cmx-assessments.sqlite3"
+
+
+@lru_cache(maxsize=16)
+def _assessment_store_for_path(database_path: str) -> SQLiteAssessmentStore:
+    """Reuse the configured durable assessment store across requests."""
+    return SQLiteAssessmentStore(database_path)
+
+
+def _assessment_store() -> SQLiteAssessmentStore:
+    return _assessment_store_for_path(os.environ.get("CMX_ASSESSMENT_DB_PATH", _ASSESSMENT_DATABASE_DEFAULT))
 
 
 @lru_cache(maxsize=16)
@@ -144,6 +156,26 @@ def require_assessment_write(
     return principal
 
 
+def require_assessment_read(
+    principal: PrincipalContext = Depends(require_service_principal),
+) -> PrincipalContext:
+    """Require explicit read permission for persisted assessment records."""
+    try:
+        authorize_permissions(
+            principal,
+            required_permissions=frozenset({"assessment:read"}),
+            resource_tenant_id=principal.tenant_id,
+        )
+    except AuthorizationError as exc:
+        status_code = 403 if exc.code == "missing_permission" else 401
+        raise HTTPException(
+            status_code=status_code,
+            detail="The credential is not authorized to read assessments.",
+            headers={"WWW-Authenticate": "Bearer"} if status_code == 401 else None,
+        ) from exc
+    return principal
+
+
 @app.get("/health", tags=["Operations"])
 def health() -> dict[str, str]:
     """Readiness endpoint; does not claim external dependencies are healthy."""
@@ -168,16 +200,60 @@ def api_info() -> dict[str, str]:
 )
 def evaluate_assessment(
     request: DecisionRequest,
+    response: Response,
     principal: PrincipalContext = Depends(require_assessment_write),
 ) -> DecisionResponse:
-    """Evaluate supplied candidates after authenticating an authorized service."""
-    # Referencing the dependency-derived principal makes the trust boundary explicit;
-    # the request body contains no identity, permission, or tenant claims.
-    _ = principal
+    """Evaluate and durably snapshot the result under the authenticated tenant."""
     try:
-        return evaluate_decision(request)
+        decision = evaluate_decision(request)
+        saved = _assessment_store().create(
+            tenant_id=principal.tenant_id,
+            request=request.model_dump(mode="json"),
+            response=decision.model_dump(mode="json"),
+        )
+        response.headers["X-CMX-Assessment-ID"] = saved["assessment_id"]
+        return decision
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, sqlite3.Error, AssessmentIntegrityError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Assessment persistence is temporarily unavailable.",
+        ) from exc
+
+
+@app.get("/api/v1/assessments", tags=["Decision Support"])
+def list_assessments(
+    limit: int = 50,
+    principal: PrincipalContext = Depends(require_assessment_read),
+) -> dict[str, object]:
+    """List the authenticated tenant's assessment snapshots only."""
+    try:
+        records = _assessment_store().list(tenant_id=principal.tenant_id, limit=limit)
+        return {"items": records, "count": len(records)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, sqlite3.Error, AssessmentIntegrityError) as exc:
+        raise HTTPException(status_code=503, detail="Assessment storage is temporarily unavailable.") from exc
+
+
+@app.get("/api/v1/assessments/{assessment_id}", tags=["Decision Support"])
+def get_assessment(
+    assessment_id: str,
+    principal: PrincipalContext = Depends(require_assessment_read),
+) -> dict[str, object]:
+    """Read a snapshot only when it belongs to the authenticated tenant."""
+    try:
+        record = _assessment_store().get(
+            tenant_id=principal.tenant_id, assessment_id=assessment_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, sqlite3.Error, AssessmentIntegrityError) as exc:
+        raise HTTPException(status_code=503, detail="Assessment storage is temporarily unavailable.") from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assessment not found.")
+    return record
 
 
 def run() -> None:
