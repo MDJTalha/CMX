@@ -185,7 +185,7 @@ def test_provider_failure_returns_operation_to_uncertain_and_requires_reconcilia
 
 
 def test_persisted_dispatching_state_is_treated_as_crash_window_and_never_replayed(tmp_path):
-    tasks, ledger, _, _, executor, payload, key, _, issued, provider, service = setup(tmp_path)
+    tasks, ledger, _, _, executor, payload, key, uncertain, issued, provider, service = setup(tmp_path)
 
     # Simulate a process crash after the durable dispatch claim but before the
     # provider call. The row survives restart in dispatching state.
@@ -205,9 +205,7 @@ def test_persisted_dispatching_state_is_treated_as_crash_window_and_never_replay
             event_type="operation.recovery_dispatching",
             occurred_at=201,
             payload={
-                "operation_id": ledger.get(
-                    key, principal=executor, authorization_now_epoch=201
-                ).operation_id,
+                "operation_id": uncertain.operation_id,
                 "from_state": "uncertain",
                 "to_state": "dispatching",
                 "authorization_id": issued.authorization_id,
