@@ -28,3 +28,26 @@ jobs:
         run: python -m compileall -q src tests
       - name: Run automated tests
         run: python -m pytest
+
+  frontend-browser-tests:
+    name: Frontend browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check frontend JavaScript syntax
+        run: node --check frontend/app.js
+      - name: Install pinned frontend test dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium for Playwright
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run browser regression tests
+        working-directory: frontend
+        run: npm test
