@@ -111,3 +111,8 @@ def test_imported_session_counts_and_nested_records_are_validated_before_renderi
     assert "x.result.evaluated_count!==x.result.evaluations.length" in script.text
     assert "Number.isFinite(e.documented_match_score)" in script.text
     assert "c[k]!==undefined&&!strs(c[k])" in script.text
+    assert "x.result.evaluations.length>50" in script.text
+    assert "x.request.requirements.length>50" in script.text
+    assert "Number.isInteger(r.weight)" in script.text
+    assert "r.weight<1||r.weight>5" in script.text
+    assert "finiteOrNull(e.estimated_first_year_cost_usd)" in script.text
