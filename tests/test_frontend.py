@@ -116,3 +116,18 @@ def test_imported_session_counts_and_nested_records_are_validated_before_renderi
     assert "Number.isInteger(r.weight)" in script.text
     assert "r.weight<1||r.weight>5" in script.text
     assert "finiteOrNull(e.estimated_first_year_cost_usd)" in script.text
+
+
+def test_assessment_submission_validates_limits_costs_and_evidence_urls_client_side():
+    script = TestClient(app).get("/app.js")
+    assert script.status_code == 200
+    for expected in (
+        "reqs.length>50",
+        "cands.length>50",
+        "new URL(source)",
+        "Evidence source URLs must use HTTP or HTTPS.",
+        "Candidate costs must be finite, non-negative numbers",
+        "The first-year budget must be a finite, non-negative number.",
+        "Add at least one requirement before evaluation.",
+    ):
+        assert expected in script.text
