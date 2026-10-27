@@ -13,7 +13,7 @@ const apiBase = ({ requiresCredential = false } = {}) => {
   if (requiresCredential && parsed.protocol !== "https:" && !loopback) {
     throw new Error("Refusing to send a bearer credential to a non-HTTPS remote API. Use HTTPS or a loopback development address.");
   }
-  return parsed.href.replace(/\\/+$/, "");
+  return parsed.href.replace(/\/+$/, "");
 };
 // Credentials exist only in these in-memory variables; never write them to storage.
 let bearerCredential = "";
