@@ -7,6 +7,7 @@ import sqlite3
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from cmx import __version__
@@ -65,6 +66,23 @@ app = FastAPI(
         "server-issued bearer service credential with the assessment:write permission."
     ),
     version=__version__,
+)
+
+# Explicit origin allowlist. No wildcard origins and no cookie credentials: the API
+# authenticates requests with Authorization bearer headers.
+def _cors_origins() -> list[str]:
+    configured = os.environ.get("CMX_CORS_ORIGINS")
+    raw = configured if configured is not None else "http://127.0.0.1:4173,http://localhost:4173"
+    return [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Accept", "Authorization", "Content-Type", "X-CMX-Tenant"],
+    max_age=600,
 )
 
 

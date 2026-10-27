@@ -80,6 +80,46 @@ def test_evaluation_endpoint_accepts_authorized_structured_request(tmp_path, mon
     assert body["recommended_candidate_id"] == "demo_solution"
 
 
+def test_oidc_evaluation_uses_bearer_token_and_tenant_header(tmp_path, monkeypatch):
+    import cmx.main as main
+    from cmx.security import PrincipalContext
+
+    principal = PrincipalContext(
+        subject_id="oidc_test_subject",
+        tenant_id="tenant_alpha",
+        issuer="https://issuer.example",
+        permissions=frozenset({"assessment:write"}),
+        issued_at=int(time.time()),
+        expires_at=int(time.time()) + 3600,
+        authentication_verified=True,
+        authentication_method="oidc",
+    )
+
+    class FakeAuthenticator:
+        def authenticate(self, token, *, tenant_id):
+            assert token == "signed-token"
+            assert tenant_id == "tenant_alpha"
+            return principal
+
+    monkeypatch.setenv("CMX_AUTH_MODE", "oidc")
+    monkeypatch.setenv("CMX_OIDC_ISSUER", "https://issuer.example")
+    monkeypatch.setenv("CMX_OIDC_AUDIENCE", "cmx-api")
+    monkeypatch.setenv("CMX_OIDC_JWKS_URL", "https://issuer.example/.well-known/jwks.json")
+    monkeypatch.setenv("CMX_ASSESSMENT_DB_PATH", str(tmp_path / "cmx-assessments.sqlite3"))
+    monkeypatch.setattr(main, "_oidc_authenticator_for_config", lambda *args: FakeAuthenticator())
+
+    response = client.post(
+        "/api/v1/assessments/evaluate",
+        json=assessment_payload(),
+        headers={
+            "Authorization": "Bearer signed-token",
+            "X-CMX-Tenant": "tenant_alpha",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "recommendation_ready"
+
+
 def test_evaluation_endpoint_rejects_missing_credentials():
     response = client.post(
         "/api/v1/assessments/evaluate",

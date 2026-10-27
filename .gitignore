@@ -17,3 +17,6 @@ build/
 data/*.sqlite3
 data/*.sqlite3-wal
 data/*.sqlite3-shm
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
