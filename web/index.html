@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f7f8fc">
+  <meta name="description" content="CMX — evidence-aware decision-to-outcome intelligence.">
+  <title>CMX — Decision Intelligence</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#overview" aria-label="CMX home">
+        <span class="brand-mark">C<span>M</span></span>
+        <span class="brand-copy"><strong>CMX</strong><small>Decision intelligence</small></span>
+      </a>
+      <div class="workspace-label">WORKSPACE</div>
+      <nav class="nav" aria-label="Main navigation">
+        <a class="nav-link active" href="#overview" data-view="overview"><span class="nav-icon">▦</span>Overview</a>
+        <a class="nav-link" href="#assessment" data-view="assessment"><span class="nav-icon">✳</span>New assessment</a>
+        <a class="nav-link" href="#history" data-view="history"><span class="nav-icon">◷</span>Session history</a>
+        <a class="nav-link" href="#trust" data-view="trust"><span class="nav-icon">◇</span>Trust & evidence</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-note"><span class="note-icon">✓</span><div><strong>Evidence first</strong><p>Understand the need. Verify before asserting. Authorize before acting.</p></div></div>
+        <div class="profile"><div class="avatar">CX</div><div class="profile-copy"><strong>CMX Workspace</strong><small id="auth-label">API connection not checked</small></div><span class="profile-menu">···</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobile-menu" aria-label="Toggle navigation">☰</button>
+        <div class="breadcrumbs">Workspace <span>/</span> <strong id="breadcrumb-current">Overview</strong></div>
+        <div class="top-actions"><span class="env-pill"><i></i> API-backed workspace</span><button class="icon-button" id="refresh-button" aria-label="Refresh API status" title="Refresh API status">↻</button></div>
+      </header>
+
+      <section class="view active" id="view-overview" data-title="Overview">
+        <div class="page-heading">
+          <div><div class="eyebrow">DECISION-TO-OUTCOME INTELLIGENCE</div><h1>Make the next decision <span>with clarity.</span></h1><p class="subheading">Bring the problem, requirements and options into one evidence-aware workspace.</p></div>
+          <button class="button primary" data-go="assessment"><span>＋</span> Start assessment</button>
+        </div>
+        <div class="status-banner" id="api-banner" role="status">
+          <div class="status-symbol"><span class="pulse"></span></div>
+          <div class="status-copy"><strong>Checking CMX API</strong><p>Verifying the service health and version.</p></div>
+          <span class="status-tag" id="api-status">CHECKING</span>
+        </div>
+        <div class="metric-grid">
+          <article class="metric-card"><div class="metric-top"><span>Assessments this session</span><span class="metric-icon purple">▤</span></div><div class="metric-value" id="metric-assessments">0</div><div class="metric-foot">Created in this browser session</div></article>
+          <article class="metric-card"><div class="metric-top"><span>Options evaluated</span><span class="metric-icon blue">◇</span></div><div class="metric-value" id="metric-options">0</div><div class="metric-foot">Across completed assessments</div></article>
+          <article class="metric-card"><div class="metric-top"><span>Recommendations ready</span><span class="metric-icon green">↗</span></div><div class="metric-value" id="metric-ready">0</div><div class="metric-foot">Based on current engine responses</div></article>
+          <article class="metric-card"><div class="metric-top"><span>API availability</span><span class="metric-icon amber">⌁</span></div><div class="metric-value compact" id="metric-api">Checking</div><div class="metric-foot" id="metric-version">Version not yet verified</div></article>
+        </div>
+        <div class="content-grid">
+          <article class="panel start-panel">
+            <div class="panel-heading"><div><div class="eyebrow">GET STARTED</div><h2>Turn a complex question into a clear next step</h2></div><span class="heading-icon">✳</span></div>
+            <p class="panel-description">CMX compares options against your explicit requirements. It distinguishes documented matches from unknowns and flags evidence that needs validation.</p>
+            <div class="steps">
+              <div class="step"><span class="step-number">01</span><div><strong>Describe the decision</strong><p>Define the challenge, desired outcome and operating region.</p></div></div>
+              <div class="step"><span class="step-number">02</span><div><strong>Set requirements and options</strong><p>Mark critical needs and provide candidate records and evidence.</p></div></div>
+              <div class="step"><span class="step-number">03</span><div><strong>Review the evidence</strong><p>See documented matches, gaps, cost assumptions and cautions.</p></div></div>
+            </div>
+            <button class="button primary" data-go="assessment">Create an assessment <span>→</span></button>
+          </article>
+          <article class="panel recent-panel">
+            <div class="panel-heading"><div><div class="eyebrow">RECENT ACTIVITY</div><h2>Session history</h2></div><button class="text-button" data-go="history">View all →</button></div>
+            <div id="recent-list" class="recent-list"><div class="empty-state"><span class="empty-icon">◷</span><strong>No assessments yet</strong><p>Your completed assessments will appear here for this browser session.</p></div></div>
+          </article>
+        </div>
+        <div class="principle-strip"><span class="principle-icon">ⓘ</span><p><strong>Built for defensible decisions.</strong> A match score reflects documented requirement coverage—not a probability of success. Unknown evidence stays visible instead of being treated as fact.</p><a href="#trust" data-go="trust">Our evidence principles →</a></div>
+      </section>
+
+      <section class="view" id="view-assessment" data-title="New assessment">
+        <div class="page-heading compact-heading"><div><div class="eyebrow">DECISION WORKSPACE</div><h1>New assessment</h1><p class="subheading">Define the decision, add requirements and compare the options you provide.</p></div><span class="draft-pill">● Unsaved draft</span></div>
+        <form id="assessment-form" class="assessment-layout">
+          <div class="form-column">
+            <article class="panel form-panel">
+              <div class="section-title"><span class="section-number">01</span><div><h2>Frame the decision</h2><p>Give CMX enough context to evaluate the options meaningfully.</p></div></div>
+              <label for="problem">What decision are you trying to make? <span class="required">*</span></label>
+              <textarea id="problem" name="problem" required minlength="10" maxlength="4000" rows="3" placeholder="Example: We need to choose a customer support platform that reduces response time without increasing operational cost."></textarea>
+              <div class="field-meta"><span>Be specific about the problem and constraints.</span><span id="problem-count">0 / 4000</span></div>
+              <label for="outcome">What would a successful outcome look like? <span class="required">*</span></label>
+              <textarea id="outcome" name="outcome" required minlength="3" maxlength="1000" rows="2" placeholder="Example: Faster resolution, clear ownership and reliable reporting."></textarea>
+              <div class="two-fields"><div><label for="region">Operating region</label><input id="region" name="region" value="Pakistan" maxlength="80" required></div><div><label for="budget">Maximum first-year budget (USD)</label><div class="input-prefix"><span>$</span><input id="budget" name="budget" type="number" min="0" step="0.01" placeholder="No limit specified"></div></div></div>
+            </article>
+            <article class="panel form-panel">
+              <div class="section-title"><span class="section-number">02</span><div><h2>Requirements</h2><p>Add the capabilities that matter. Mandatory requirements are treated as hard constraints.</p></div><span class="count-pill" id="requirement-count">0</span></div>
+              <div id="requirements-list" class="dynamic-list"></div>
+              <button type="button" class="button secondary small-button" id="add-requirement">＋ Add requirement</button>
+            </article>
+            <article class="panel form-panel">
+              <div class="section-title"><span class="section-number">03</span><div><h2>Candidate options</h2><p>Add comparable options. CMX evaluates supplied data only; it does not discover or independently verify vendors.</p></div><span class="count-pill" id="candidate-count">0</span></div>
+              <div id="candidates-list" class="candidate-list"></div>
+              <button type="button" class="button secondary small-button" id="add-candidate">＋ Add candidate option</button>
+            </article>
+            <div class="form-footer"><span class="muted"><span class="required">*</span> Required fields</span><button type="submit" class="button primary" id="evaluate-button">Evaluate options <span>→</span></button></div>
+          </div>
+          <aside class="form-aside">
+            <article class="panel aside-panel"><div class="aside-title"><span>◇</span><h3>Assessment checklist</h3></div><div class="check-row"><span id="check-problem" class="check-circle">1</span><div><strong>Decision framed</strong><p>Problem and desired outcome</p></div></div><div class="check-row"><span id="check-requirements" class="check-circle">2</span><div><strong>Requirements set</strong><p>At least one requirement recommended</p></div></div><div class="check-row"><span id="check-candidates" class="check-circle">3</span><div><strong>Options added</strong><p>At least one option recommended</p></div></div></article>
+            <article class="panel caution-panel"><span class="caution-icon">ⓘ</span><h3>Evidence, not assumptions</h3><p>Unverified prices, missing capabilities and unsupported regional claims remain visible in the result. A provisional lead is not a final recommendation.</p></article>
+          </aside>
+        </form>
+        <div id="assessment-error" class="notice error hidden" role="alert"></div>
+      </section>
+
+      <section class="view" id="view-history" data-title="Session history">
+        <div class="page-heading"><div><div class="eyebrow">YOUR WORKSPACE</div><h1>Session history</h1><p class="subheading">Review assessments completed in this browser session.</p></div><button class="button primary" data-go="assessment">＋ New assessment</button></div>
+        <div class="panel history-panel"><div class="table-toolbar"><div><h2>Assessments</h2><p>Session-only history; this version does not persist assessment records on the server.</p></div><span class="count-pill" id="history-count">0 records</span></div><div id="history-table"></div></div>
+      </section>
+
+      <section class="view" id="view-trust" data-title="Trust & evidence">
+        <div class="page-heading"><div><div class="eyebrow">TRANSPARENCY BY DESIGN</div><h1>Trust & evidence</h1><p class="subheading">Understand what the current CMX engine does—and what it does not claim.</p></div></div>
+        <div class="trust-grid">
+          <article class="panel trust-card"><span class="trust-icon green">✓</span><h2>Explicit requirements</h2><p>Capability keys and requirement weights are provided explicitly. The core engine does not silently infer semantic matches from free text.</p><span class="status-label supported">IMPLEMENTED</span></article>
+          <article class="panel trust-card"><span class="trust-icon blue">⌕</span><h2>Evidence status</h2><p>Evidence is labeled verified, user-provided, estimated, assumed or unknown. The interface never treats a user-entered claim as independently verified.</p><span class="status-label supported">IMPLEMENTED</span></article>
+          <article class="panel trust-card"><span class="trust-icon amber">!</span><h2>Uncertainty handling</h2><p>Unknown requirements and missing cost data remain distinct from confirmed failures. Results may be provisional or require more information.</p><span class="status-label supported">IMPLEMENTED</span></article>
+          <article class="panel trust-card"><span class="trust-icon purple">⌁</span><h2>Authorization boundary</h2><p>Assessment evaluation requires an authorized bearer credential with the assessment:write permission. Credentials are never stored in browser persistence.</p><span class="status-label supported">API ENFORCED</span></article>
+          <article class="panel trust-card"><span class="trust-icon blue">↗</span><h2>Documented match score</h2><p>The score describes documented requirement coverage. It is not a confidence estimate, success probability, independent audit or endorsement.</p><span class="status-label supported">EXPLAINABLE</span></article>
+          <article class="panel trust-card"><span class="trust-icon gray">◌</span><h2>Current limitations</h2><p>No built-in web discovery, source validation, LLM integration, server-side assessment history or provider catalogue is exposed in this version.</p><span class="status-label limited">NOT YET IMPLEMENTED</span></article>
+        </div>
+        <article class="panel api-details"><div class="panel-heading"><div><div class="eyebrow">LIVE SERVICE</div><h2>API connection</h2></div><button class="button secondary small-button" id="trust-refresh">Check again</button></div><dl><div><dt>Service</dt><dd id="trust-service">Checking…</dd></div><div><dt>Version</dt><dd id="trust-version">—</dd></div><div><dt>Health endpoint</dt><dd><code>/health</code></dd></div><div><dt>Evaluation endpoint</dt><dd><code>POST /api/v1/assessments/evaluate</code></dd></div><div><dt>Authentication</dt><dd>Bearer credential · assessment:write</dd></div></dl></article>
+      </section>
+
+      <section class="view" id="view-results" data-title="Assessment results">
+        <div class="page-heading"><div><div class="eyebrow">ASSESSMENT REPORT</div><h1>Decision report</h1><p class="subheading" id="result-subtitle">Results from the CMX decision engine.</p></div><div class="heading-actions"><button class="button secondary" id="export-result">Export report</button><button class="button primary" data-go="assessment">＋ New assessment</button></div></div>
+        <div id="results-content"></div>
+      </section>
+
+      <footer class="footer"><span>CMX <span class="footer-dot">·</span> Customer & Market Experience</span><span>Evidence-aware decisions. Human-authorized actions.</span></footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
