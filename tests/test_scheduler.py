@@ -116,9 +116,11 @@ def test_concurrent_workers_do_not_claim_the_same_live_job(tmp_path):
     second = threading.Thread(target=run, args=("worker_b",))
     first.start()
     second.start()
-    first.join(timeout=5)
-    second.join(timeout=5)
-    assert not first.is_alive() and not second.is_alive()
+    # Windows runners can take longer to release SQLite write locks under contention.
+    # Give both workers time to finish before asserting that no thread was stranded.
+    first.join(timeout=15)
+    second.join(timeout=15)
+    assert not first.is_alive() and not second.is_alive(), "concurrent scheduler workers did not terminate"
     assert calls == ["step_one"]
     assert sorted(result.status for result in results) == ["idle", "succeeded"]
 
