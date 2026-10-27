@@ -154,13 +154,13 @@ class SQLiteRecoveryExecutor:
                     raise RecoveryExecutionError("Durable operation binding changed before dispatch.")
                 if row["request_hash"] != record.request_hash or row["state"] != "uncertain":
                     raise RecoveryExecutionError("Durable operation state changed before recovery dispatch.")
-                connection.execute(
+                cursor = connection.execute(
                     """UPDATE cmx_idempotency_operations
                        SET state = 'dispatching', updated_at = ?
                        WHERE tenant_id = ? AND idempotency_key = ? AND state = 'uncertain'""",
                     (now, principal.tenant_id, record.idempotency_key),
                 )
-                if connection.total_changes < 1:
+                if cursor.rowcount != 1:
                     raise RecoveryExecutionError("Could not claim the uncertain operation for recovery.")
                 self.idempotency_store._append_event(
                     connection,
