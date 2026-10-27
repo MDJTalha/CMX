@@ -14,11 +14,13 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Phase 1 — Validation and persistence
 
-- [ ] Validate one SME workflow with customer interviews and paid pilots
-- [ ] Add versioned assessment templates
-- [ ] Add database persistence and immutable decision/audit identifiers
-- [ ] Add claim-level evidence records and expiry/freshness policies
-- [ ] Add schema migration and backup/restore tests
+- [ ] Validate one SME workflow with real customer interviews and paid-pilot evidence (owner input required; not a code-only task)
+- [x] Add versioned assessment templates, with explicit not-validated status
+- [x] Add tenant-scoped durable assessment snapshots and immutable identifiers
+- [x] Add claim-level evidence records, content digests, provenance and expiry/freshness policies
+- [x] Add schema version tracking and backup/restore tests
+- [x] Add API history/read endpoints protected by assessment:read and tenant-scoped lookups
+- [ ] Verify final branch CI and perform a production-environment restore drill
 
 ## Phase 2 — Core reasoning kernel
 
@@ -90,3 +92,8 @@ The coordinator has bounded execution and explicit worker lease fencing. Recover
 - Scheduler workers in wall-clock mode now renew their queue lease while the coordinator runs and refuse result commits after heartbeat loss; deterministic explicit-time tests do not start a real-time heartbeat.
 
 - Optional OIDC API authentication now verifies RS256 issuer/audience/JWKS/time claims and derives tenant permissions only from the local membership store; service-key mode remains the default. This is not a browser-session implementation or production OIDC certification.
+
+
+## Phase 1 implementation notes
+
+See docs/phase1-validation-persistence.md for storage contracts, API behavior, security boundaries, test coverage, and the customer-validation evidence required to close the phase. The software work is implemented on feat/phase1-assessment-persistence; it is not complete until CI passes and real market evidence is supplied.
