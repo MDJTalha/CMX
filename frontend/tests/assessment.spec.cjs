@@ -1,0 +1,73 @@
+const { test, expect } = require("@playwright/test");
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
+
+const entry = pathToFileURL(path.resolve(__dirname, "../frontend/index.html")).href;
+
+test("validates input before calling the API", async ({ page }) => {
+  let requests = 0;
+  await page.route("http://127.0.0.1:8000/**", async (route) => {
+    requests += 1;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+  });
+  await page.goto(entry);
+  await page.getByLabel(/What problem are you trying to solve/).fill("short");
+  await page.getByLabel("Desired outcome *").fill("Save time");
+  await page.getByRole("button", { name: "Evaluate decision" }).click();
+  await expect(page.getByRole("status")).toContainText("at least 10 characters");
+  expect(requests).toBe(0);
+});
+
+test("sends a transient bearer token and renders evidence review safely", async ({ page }) => {
+  let receivedAuthorization = "";
+  await page.route("http://127.0.0.1:8000/api/v1/assessments/evaluate", async (route) => {
+    receivedAuthorization = route.request().headers().authorization || "";
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "needs_review",
+        summary: "Evidence is incomplete.",
+        evaluated_count: 1,
+        evaluations: [{
+          name: "<img src=x onerror=alert(1)>",
+          eligibility: "unknown",
+          documented_match_score: 45,
+          evidence_status: "partial",
+          pricing_status: "unknown",
+          unknown_requirements: ["Security certification not supplied"],
+          source_urls: ["javascript:alert(1)", "https://example.com/evidence"]
+        }]
+      })
+    });
+  });
+  await page.goto(entry);
+  await page.getByLabel("Bearer credential").fill("short-lived-test-token");
+  await page.getByLabel(/What problem are you trying to solve/).fill("Automate a manual invoice workflow");
+  await page.getByLabel("Desired outcome *").fill("Reduce processing time while retaining human approval.");
+  await page.getByRole("button", { name: "Evaluate decision" }).click();
+
+  await expect(page.getByRole("heading", { name: "needs_review" })).toBeVisible();
+  await expect(page.getByText("Security certification not supplied")).toBeVisible();
+  await expect(page.locator(".candidate-review h4")).toHaveText("<img src=x onerror=alert(1)>");
+  await expect(page.locator(".candidate-review img")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "https://example.com/evidence" })).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(page.getByText("javascript:alert(1)")).toBeVisible();
+  expect(receivedAuthorization).toBe("Bearer short-lived-test-token");
+  await expect(page.locator("#api-token")).toHaveValue("short-lived-test-token");
+  await page.getByRole("button", { name: "Clear credential" }).click();
+  await expect(page.locator("#api-token")).toHaveValue("");
+});
+
+test("shows API authorization failures without presenting a result as successful", async ({ page }) => {
+  await page.route("http://127.0.0.1:8000/api/v1/assessments/evaluate", async (route) => {
+    await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Unauthorized" }) });
+  });
+  await page.goto(entry);
+  await page.getByLabel(/What problem are you trying to solve/).fill("Automate a manual invoice workflow");
+  await page.getByLabel("Desired outcome *").fill("Reduce processing time while retaining human approval.");
+  await page.getByRole("button", { name: "Evaluate decision" }).click();
+  await expect(page.getByRole("status")).toContainText("Authentication or permission required");
+  await expect(page.locator("#result-summary")).toBeHidden();
+  await expect(page.locator("#result-json")).toContainText("401");
+});
