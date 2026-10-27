@@ -107,6 +107,7 @@ def test_imported_session_counts_and_nested_records_are_validated_before_renderi
     assert script.status_code == 200
     assert "function safeCount(v)" in script.text
     assert "safeCount(x.result.evaluated_count)" in script.text
-    assert "Number.isSafeInteger(x.result.evaluated_count)" in script.text
-    assert "x.result.evaluations.every(v=>v&&typeof v===\"object\"&&!Array.isArray(v))" in script.text
-    assert "x.request.candidates.every(v=>v&&typeof v===\"object\"&&!Array.isArray(v))" in script.text
+    assert "function validSessionRecord(x)" in script.text
+    assert "x.result.evaluated_count!==x.result.evaluations.length" in script.text
+    assert "Number.isFinite(e.documented_match_score)" in script.text
+    assert "c[k]!==undefined&&!strs(c[k])" in script.text
