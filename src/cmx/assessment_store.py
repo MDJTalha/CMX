@@ -251,7 +251,7 @@ class SQLiteAssessmentStore:
             raise ValueError("Backup destination must differ from the source database")
         target.parent.mkdir(parents=True, exist_ok=True)
         # SQLite's backup API safely captures committed state, including WAL content.
-        with closing(self._connect()) as source, sqlite3.connect(target) as dest:
+        with closing(self._connect()) as source, closing(sqlite3.connect(target)) as dest:
             source.backup(dest)
         return target
 
@@ -262,7 +262,7 @@ class SQLiteAssessmentStore:
             raise ValueError("A distinct existing backup file is required")
         target.parent.mkdir(parents=True, exist_ok=True)
         # Validate backup before replacing any destination file.
-        with sqlite3.connect(f"file:{source_path.as_posix()}?mode=ro", uri=True) as db:
+        with closing(sqlite3.connect(f"file:{source_path.as_posix()}?mode=ro", uri=True)) as db:
             integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
             version = db.execute("SELECT MAX(version) FROM cmx_schema_migrations").fetchone()[0]
         if integrity != "ok" or version != SCHEMA_VERSION:
@@ -270,9 +270,9 @@ class SQLiteAssessmentStore:
         with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".cmx-restore-", delete=False) as tmp:
             temp_path = Path(tmp.name)
         try:
-            with sqlite3.connect(f"file:{source_path.as_posix()}?mode=ro", uri=True) as source, sqlite3.connect(temp_path) as dest:
+            with closing(sqlite3.connect(f"file:{source_path.as_posix()}?mode=ro", uri=True)) as source, closing(sqlite3.connect(temp_path)) as dest:
                 source.backup(dest)
-            with sqlite3.connect(temp_path) as check:
+            with closing(sqlite3.connect(temp_path)) as check:
                 if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                     raise AssessmentIntegrityError("Restored database integrity check failed")
             os.replace(temp_path, target)
