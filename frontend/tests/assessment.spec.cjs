@@ -59,6 +59,24 @@ test("sends a transient bearer token and renders evidence review safely", async 
   await expect(page.locator("#api-token")).toHaveValue("");
 });
 
+test("sends the tenant selector with an OIDC bearer request", async ({ page }) => {
+  let receivedHeaders;
+  await page.route("http://127.0.0.1:8000/api/v1/assessments/evaluate", async (route) => {
+    receivedHeaders = route.request().headers();
+    await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Unauthorized" }) });
+  });
+  await page.goto(entry);
+  await page.locator("#api-token").fill("short-lived-oidc-token");
+  await page.getByLabel("Tenant ID (OIDC mode only)").fill("tenant-alpha");
+  await page.getByLabel(/What problem are you trying to solve/).fill("Automate a manual invoice workflow");
+  await page.getByLabel("Desired outcome *").fill("Reduce processing time while retaining human approval.");
+  await page.getByRole("button", { name: "Evaluate decision" }).click();
+
+  await expect(page.getByRole("status")).toContainText("Authentication or permission required");
+  expect(receivedHeaders.authorization).toBe("Bearer short-lived-oidc-token");
+  expect(receivedHeaders["x-cmx-tenant"]).toBe("tenant-alpha");
+});
+
 test("shows API authorization failures without presenting a result as successful", async ({ page }) => {
   await page.route("http://127.0.0.1:8000/api/v1/assessments/evaluate", async (route) => {
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Unauthorized" }) });
@@ -70,4 +88,18 @@ test("shows API authorization failures without presenting a result as successful
   await expect(page.getByRole("status")).toContainText("Authentication or permission required");
   await expect(page.locator("#result-summary")).toBeHidden();
   await expect(page.locator("#result-json")).toContainText("401");
+});
+
+test("shows non-JSON API failures without presenting a result as successful", async ({ page }) => {
+  await page.route("http://127.0.0.1:8000/api/v1/assessments/evaluate", async (route) => {
+    await route.fulfill({ status: 503, contentType: "text/plain", body: "Service temporarily unavailable" });
+  });
+  await page.goto(entry);
+  await page.getByLabel(/What problem are you trying to solve/).fill("Automate a manual invoice workflow");
+  await page.getByLabel("Desired outcome *").fill("Reduce processing time while retaining human approval.");
+  await page.getByRole("button", { name: "Evaluate decision" }).click();
+
+  await expect(page.getByRole("status")).toContainText("API rejected the request");
+  await expect(page.locator("#result-summary")).toBeHidden();
+  await expect(page.locator("#result-json")).toContainText("Service temporarily unavailable");
 });

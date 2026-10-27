@@ -34,4 +34,4 @@ The request fields are `problem_statement`, `desired_outcome`, `region`, `max_fi
 
 ## Verification and limitations
 
-CI includes static frontend contract checks and API CORS tests. These are not browser automation and do not prove full running-system integration. Playwright/browser interaction tests, real bearer-token integration against a running API, keyboard-only manual review, screen-reader checks, full WCAG audit, production deployment and browser/device verification remain outstanding. No production-readiness claim is made.
+CI includes Playwright browser interaction tests with a mocked API, API service-token and simulated OIDC authentication tests, and CORS allowlist/preflight tests. These cover request headers and response/error rendering across the frontend and API contracts, but do not use a live identity provider or a deployed browser/API environment. Real OIDC provider integration, keyboard-only manual review, screen-reader checks, full WCAG audit, production deployment and browser/device verification remain outstanding. No production-readiness claim is made.
