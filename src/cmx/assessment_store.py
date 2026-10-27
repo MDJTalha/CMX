@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import tempfile
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -61,7 +62,7 @@ class SQLiteAssessmentStore:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("PRAGMA journal_mode = WAL")
             db.execute("""
                 CREATE TABLE IF NOT EXISTS cmx_schema_migrations (
@@ -246,7 +247,7 @@ class SQLiteAssessmentStore:
             raise ValueError("Backup destination must differ from the source database")
         target.parent.mkdir(parents=True, exist_ok=True)
         # SQLite's backup API safely captures committed state, including WAL content.
-        with self._connect() as source, sqlite3.connect(target) as dest:
+        with closing(self._connect()) as source, sqlite3.connect(target) as dest:
             source.backup(dest)
         return target
 
