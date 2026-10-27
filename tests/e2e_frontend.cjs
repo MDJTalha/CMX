@@ -12,7 +12,7 @@ const assert = require("node:assert/strict");
     await page.getByRole("link", { name: /New assessment/ }).click();
     await page.locator("#view-assessment").waitFor({ state: "visible" });
     await page.getByRole("button", { name: /Add requirement/ }).click();
-    assert.equal(await page.locator("#requirements-list .requirement-row").count(), 1);
+    assert.equal(await page.locator("#requirements-list .dynamic-row").count(), 1);
     await page.getByRole("button", { name: /Add candidate option/ }).click();
     assert.equal(await page.locator("#candidates-list .candidate-card").count(), 1);
     await page.locator("#problem").fill("Choose a secure support platform");
