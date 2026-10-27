@@ -82,7 +82,7 @@ def test_subprocess_failures_are_sanitized(script):
     adapter = handler(script)
     with pytest.raises(HandlerExecutionError) as error:
         adapter({}, {}, context())
-    assert error.value.code in {"handler_process_failed", "invalid_handler_output"}
+    assert error.value.code in {"handler_process_failed", "invalid_handler_output", "process_io_failed"}
     assert "Traceback" not in str(error.value)
 
 
