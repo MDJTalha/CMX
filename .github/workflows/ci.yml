@@ -36,7 +36,7 @@ jobs:
         run: python -m pytest
       - name: Install browser test dependencies
         run: |
-          npm install --no-save playwright
+          npm install --no-save playwright axe-core
           npx playwright install --with-deps chromium
       - name: Start API for browser tests
         run: |
