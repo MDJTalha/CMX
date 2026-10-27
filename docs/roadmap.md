@@ -14,7 +14,8 @@ Roadmap items are proposals, not implemented capabilities. Progress is gated on 
 
 ## Phase 1 — Validation and persistence
 
-- [ ] Validate one SME workflow with real customer interviews and paid-pilot evidence (owner input required; not a code-only task)
+- [ ] Validate one SME workflow with real customer interviews and paid-pilot evidence (owner input required; not a code-only task; current reported state: interviews not started, paid-pilot status not established)
+- [x] Add an evidence-first interview guide, outreach templates, workflow decision rubric, and empty evidence register (`docs/phase1-market-validation-kit.md`, `docs/templates/market-validation-register.csv`)
 - [x] Add versioned assessment templates, with explicit not-validated status
 - [x] Add tenant-scoped durable assessment snapshots and immutable identifiers
 - [x] Add claim-level evidence records, content digests, provenance and expiry/freshness policies

@@ -73,3 +73,19 @@ A suggested minimum decision gate is five interviews in the same workflow plus a
 - Evidence content is hashed but not automatically fetched or independently verified.
 - No customer interviews or paid pilot can be performed on behalf of the owner by this code change.
 - A backup/restore test in CI does not replace a scheduled backup and restore drill in production.
+
+
+## Current market-validation state and next action
+
+As of 2026-10-27, owner-provided status is: workflow category = SME back-office workflow automation; interviews = not started; paid-pilot status = not established; additional evidence = none provided. Therefore the market-validation gate remains **not started / not established**. No demand, willingness-to-pay, customer, or savings claims should be inferred.
+
+The evidence-first research kit is in [phase1-market-validation-kit.md](phase1-market-validation-kit.md), with an empty [market-validation-register.csv](templates/market-validation-register.csv). It contains a neutral interview script, recruitment guidance, an evidence-quality rubric, outreach drafts, and explicit decision criteria. These are process assets, not customer evidence.
+
+Next actions:
+1. Identify real SME operators responsible for recurring back-office processes and invite them to voluntary discovery interviews.
+2. Conduct and record the interviews using the guide; mark unknown values as unknown and capture negative/disconfirming evidence.
+3. Select a narrow workflow only after comparing the real evidence; do not preselect a winner based on the template.
+4. Test paid-pilot willingness with a bounded scope and measurable success criterion. Count only an explicit written commitment as commitment evidence.
+5. Update the register and decision record with anonymized, consented summaries. Do not put personal contact details or confidential source material in this public repository.
+
+The software work can prepare the research and store the resulting assessment data, but it cannot conduct or truthfully substitute for customer interviews. Phase 1 must remain open until the market gate and production restore drill are evidenced.
