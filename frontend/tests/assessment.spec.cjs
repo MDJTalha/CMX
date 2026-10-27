@@ -157,3 +157,31 @@ for (const unsafeUrl of [
     expect(requests).toBe(0);
   });
 }
+
+test("keeps API health checks public and never sends the bearer credential", async ({ page }) => {
+  let healthHeaders;
+  await page.route("http://127.0.0.1:8000/health", async (route) => {
+    healthHeaders = route.request().headers();
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+  });
+  await page.goto(entry);
+  await page.getByLabel("Bearer credential").fill("do-not-send-on-health-check");
+  await page.getByRole("button", { name: "Check connection" }).click();
+  await expect(page.getByText("API connection available")).toBeVisible();
+  expect(healthHeaders.authorization).toBeUndefined();
+});
+
+test("supports keyboard navigation and keeps the main workspace reachable on mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(entry);
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#main")).toBeInViewport();
+  await expect(page.getByRole("heading", { name: "New assessment" })).toBeVisible();
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth
+  }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
+});
