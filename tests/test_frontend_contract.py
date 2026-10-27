@@ -67,7 +67,7 @@ class FrontendContractTests(unittest.TestCase):
 
     def test_protected_api_access_is_not_misrepresented_as_public(self):
         self.assertIn("assessment requests still require a bearer credential", self.js)
-        self.assertIn("Authorization: \"Bearer \"", self.js)
+        self.assertIn('headers.Authorization = "Bearer " + bearerCredential', self.js)
         self.assertIn("never write them to storage", self.js)
         self.assertNotIn("localStorage", self.js)
         self.assertNotIn("sessionStorage", self.js)
