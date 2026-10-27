@@ -9,22 +9,28 @@ on:
 permissions:
   contents: read
 
+# Avoid spending runner time on outdated commits from the same branch.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
-    name: Python 3.11 tests
+    name: Python ${{ matrix.python-version }} / ${{ matrix.os }} tests
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "${{ matrix.python-version }}"
           cache: pip
       - name: Install project and development dependencies
         run: python -m pip install -e ".[dev]"
