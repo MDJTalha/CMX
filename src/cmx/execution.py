@@ -154,6 +154,7 @@ class SubprocessJSONHandler:
         output, error_output = bytearray(), bytearray()
         overflow = threading.Event()
         reader_errors: list[BaseException] = []
+        writer_errors: list[BaseException] = []
 
         def drain(stream: Any, target: bytearray, limit: int) -> None:
             try:
@@ -182,7 +183,7 @@ class SubprocessJSONHandler:
                 process.stdin.write(document)
                 process.stdin.close()
             except (BrokenPipeError, OSError, ValueError) as exc:
-                reader_errors.append(exc)
+                writer_errors.append(exc)
                 try:
                     process.stdin.close()
                 except OSError:
