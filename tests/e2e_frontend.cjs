@@ -62,7 +62,6 @@ const assert = require("node:assert/strict");
     await page.locator("#assessment-form").evaluate(form => form.requestSubmit());
     await page.getByText("Evidence source URLs must use HTTP or HTTPS.", { exact: true }).waitFor({ state: "visible" });
     assert.equal(evaluationRequests, 0, "Invalid evidence URL schemes are rejected before an API request");
-    assert.equal(evaluationRequests, 0, "Invalid evidence URL schemes are rejected before an API request");
 
     // Successful evaluation is isolated from the real backend using a deterministic API response.
     await page.locator('#candidates-list [data-field="sources"]').first().fill("");
@@ -128,7 +127,7 @@ const assert = require("node:assert/strict");
     });
     await page.getByText("Imported 1 session records into memory only.", { exact: true }).waitFor({ state: "visible" });
     await page.locator('.nav [data-view="history"]').click();
-    await page.getByText("Choose a secure support platform", { exact: true }).waitFor({ state: "visible" });
+    await page.locator("#history-table").getByText("Choose a secure support platform", { exact: true }).waitFor({ state: "visible" });
     await page.locator('.nav [data-view="library"]').click();
     await page.getByText("Example option", { exact: true }).waitFor({ state: "visible" });
 
