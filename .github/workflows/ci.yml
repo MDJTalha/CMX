@@ -47,7 +47,7 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Install Chromium for Playwright
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - name: Run browser regression tests
         working-directory: frontend
         run: npm test
