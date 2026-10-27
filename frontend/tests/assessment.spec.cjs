@@ -136,3 +136,24 @@ test("rejects API URLs containing embedded credentials, query strings, or fragme
   expect(requests).toBe(0);
 });
 
+
+for (const unsafeUrl of [
+  "https://example.com/api?mode=unsafe",
+  "https://example.com/api#fragment"
+]) {
+  test(`rejects API URL with query or fragment: ${unsafeUrl}`, async ({ page }) => {
+    let requests = 0;
+    await page.route("**/api/v1/assessments/evaluate", async (route) => {
+      requests += 1;
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+    await page.goto(entry);
+    await page.locator("#api-base").fill(unsafeUrl);
+    await page.getByLabel("Bearer credential").fill("short-lived-test-token");
+    await page.getByLabel(/What problem are you trying to solve/).fill("Automate a manual invoice workflow");
+    await page.getByLabel("Desired outcome *").fill("Reduce processing time while retaining human approval.");
+    await page.getByRole("button", { name: "Evaluate decision" }).click();
+    await expect(page.getByRole("status")).toContainText("must not contain credentials, a query string, or a fragment");
+    expect(requests).toBe(0);
+  });
+}
