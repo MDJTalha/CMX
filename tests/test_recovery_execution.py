@@ -86,7 +86,7 @@ def test_preflight_rejects_payload_mismatch_without_consuming_ticket(tmp_path):
 def test_preflight_rejects_unknown_or_applied_provider_outcome(tmp_path, outcome):
     _, _, authorizations, _, executor, payload, record, issued, observation, service = setup(tmp_path)
     observation = observation.model_copy(update={"outcome": outcome})
-    with pytest.raises(RecoveryPreflightError, match="not eligible"):
+    with pytest.raises(RecoveryPreflightError, match="consumed"):
         service.prepare(
             record.idempotency_key, request_payload=payload, observation=observation,
             expected_provider_id="provider.test", provider_idempotency_supported=True,
@@ -141,11 +141,12 @@ def test_atomic_recovery_claim_cannot_be_replayed_with_same_ticket(tmp_path):
 
 
 def test_atomic_recovery_claim_requires_uncertain_state(tmp_path):
-    _, ledger, _, approver, executor, payload, record, issued, observation, service = setup(tmp_path)
-    ledger.mark_succeeded(
-        record.idempotency_key, {"provider_ref": "already-done"},
-        principal=approver, occurred_at=200, authorization_now_epoch=200,
-    )
+    task_store, ledger, _, approver, executor, payload, record, issued, observation, service = setup(tmp_path)
+    with task_store._connection() as connection:
+        connection.execute(
+            "UPDATE cmx_idempotency_operations SET state = 'succeeded' WHERE tenant_id = ? AND idempotency_key = ?",
+            (executor.tenant_id, record.idempotency_key),
+        )
     with pytest.raises(RecoveryPreflightError, match="eligible"):
         service.prepare(
             record.idempotency_key, request_payload=payload, observation=observation,
