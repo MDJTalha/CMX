@@ -152,7 +152,8 @@ const assert = require("node:assert/strict");
     await page.locator("#clear-session").click();
     await page.locator('.nav [data-view="assessment"]').click();
     await page.locator("#export-result").click().catch(() => {});
-    await page.locator('.nav [data-view="results"]').click();
+    await page.evaluate(() => { location.hash = "#results"; });
+    await page.locator("#view-results").waitFor({ state: "visible" });
     await page.locator("#export-result").click();
     await page.getByText("No report is selected.", { exact: true }).waitFor({ state: "visible" });
 
