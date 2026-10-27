@@ -53,3 +53,28 @@ def test_frontend_does_not_claim_unimplemented_discovery_or_server_persistence()
     assert page.status_code == 200
     assert "does not discover or independently verify vendors" in page.text
     assert "server-persisted assessment history" in documentation.read_text(encoding="utf-8")
+
+
+def test_frontend_workspace_views_and_session_controls_are_present():
+    client = TestClient(app)
+    page = client.get("/")
+    script = client.get("/app.js")
+    assert page.status_code == 200
+    for view_id in ("view-library", "view-templates", "view-settings", "view-trust", "view-results"):
+        assert f'id="{view_id}"' in page.text
+    for control_id in ("export-session", "import-session", "clear-session", "settings-refresh"):
+        assert f'id="{control_id}"' in page.text
+    assert script.status_code == 200
+    for capability in ("function library()", "function applyTemplate(", "cmx-session-export-v1", "Import file exceeds the 5 MB limit", "assessment:write"):
+        assert capability in script.text
+
+
+def test_frontend_does_not_claim_unimplemented_discovery_or_server_persistence():
+    from pathlib import Path
+
+    client = TestClient(app)
+    page = client.get("/")
+    documentation = Path(__file__).resolve().parents[1] / "docs" / "frontend.md"
+    assert page.status_code == 200
+    assert "does not discover or independently verify vendors" in page.text
+    assert "server-persisted assessment history" in documentation.read_text(encoding="utf-8")
