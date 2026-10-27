@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from cmx.main import app
@@ -20,6 +22,8 @@ def test_frontend_assets_are_served():
     assert "prefers-reduced-motion" in css.text
     assert js.status_code == 200
     assert "/api/v1/assessments/evaluate" in js.text
+    assert '"Authorization":"Bearer "+token.trim()' in js.text
+    assert "will not be saved" in js.text
 
 
 def test_health_and_api_metadata_remain_available_with_frontend():
@@ -42,36 +46,16 @@ def test_frontend_workspace_views_and_session_controls_are_present():
     for control_id in ("export-session", "import-session", "clear-session", "settings-refresh"):
         assert f'id="{control_id}"' in page.text
     assert script.status_code == 200
-    for capability in ("function library()", "function applyTemplate(", "cmx-session-export-v1", "Import file exceeds the 5 MB limit", "assessment:write"):
+    for capability in (
+        "function library()",
+        "function applyTemplate(",
+        "cmx-session-export-v1",
+        "Import file exceeds the 5 MB limit",
+    ):
         assert capability in script.text
 
 
 def test_frontend_does_not_claim_unimplemented_discovery_or_server_persistence():
-    client = TestClient(app)
-    page = client.get("/")
-    documentation = __import__("pathlib").Path(__file__).resolve().parents[1] / "docs" / "frontend.md"
-    assert page.status_code == 200
-    assert "does not discover or independently verify vendors" in page.text
-    assert "server-persisted assessment history" in documentation.read_text(encoding="utf-8")
-
-
-def test_frontend_workspace_views_and_session_controls_are_present():
-    client = TestClient(app)
-    page = client.get("/")
-    script = client.get("/app.js")
-    assert page.status_code == 200
-    for view_id in ("view-library", "view-templates", "view-settings", "view-trust", "view-results"):
-        assert f'id="{view_id}"' in page.text
-    for control_id in ("export-session", "import-session", "clear-session", "settings-refresh"):
-        assert f'id="{control_id}"' in page.text
-    assert script.status_code == 200
-    for capability in ("function library()", "function applyTemplate(", "cmx-session-export-v1", "Import file exceeds the 5 MB limit", "assessment:write"):
-        assert capability in script.text
-
-
-def test_frontend_does_not_claim_unimplemented_discovery_or_server_persistence():
-    from pathlib import Path
-
     client = TestClient(app)
     page = client.get("/")
     documentation = Path(__file__).resolve().parents[1] / "docs" / "frontend.md"
