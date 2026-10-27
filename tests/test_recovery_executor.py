@@ -190,12 +190,33 @@ def test_persisted_dispatching_state_is_treated_as_crash_window_and_never_replay
     # Simulate a process crash after the durable dispatch claim but before the
     # provider call. The row survives restart in dispatching state.
     with tasks._connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         connection.execute(
             """UPDATE cmx_idempotency_operations
                SET state = 'dispatching', updated_at = ?
                WHERE tenant_id = ? AND idempotency_key = ?""",
             (201, executor.tenant_id, key),
         )
+        ledger._append_event(
+            connection,
+            tenant_id=executor.tenant_id,
+            key=key,
+            actor_id=executor.subject_id,
+            event_type="operation.recovery_dispatching",
+            occurred_at=201,
+            payload={
+                "operation_id": ledger.get(
+                    key, principal=executor, authorization_now_epoch=201
+                ).operation_id,
+                "from_state": "uncertain",
+                "to_state": "dispatching",
+                "authorization_id": issued.authorization_id,
+                "evidence_ref": "provider-evidence:case-123",
+                "provider_id": "provider_test",
+                "provider_idempotency": True,
+            },
+        )
+        connection.execute("COMMIT")
 
     with pytest.raises(RecoveryExecutionError, match="Only an uncertain operation"):
         service.execute(
