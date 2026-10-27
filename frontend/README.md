@@ -16,9 +16,9 @@ Open `http://127.0.0.1:4173`. The API base defaults to `http://127.0.0.1:8000`.
 
 - The current API evaluation route requires a bearer credential. This starter deliberately does not collect, persist, or invent credentials; a protected request will be rejected until an approved authentication flow is implemented.
 - Cross-origin requests require the API's CORS configuration to allow the frontend origin. CORS has not been configured by this increment.
-- Request field names and nested requirement/candidate schemas must match the API contract. Check `/docs` for the exact schema; this first UI does not guess vendor records.
+- The request uses the API contract fields `problem_statement`, `desired_outcome`, `region`, `max_first_year_cost_usd`, `requirements`, and `candidates`. Requirement and candidate objects are validated by the API; check `/docs` for exact nested fields. The UI does not guess vendor records.
 - Results are shown as raw JSON; visual comparison, history, session login, MFA and workflow screens are not implemented yet.
-- No production deployment, browser matrix or automated frontend test runner is claimed by this increment.
+- The repository CI currently runs backend tests only. No automated frontend test runner, production deployment, or browser/device matrix is claimed by this increment.
 
 ## Accessibility and privacy
 
