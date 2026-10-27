@@ -103,3 +103,36 @@ test("shows non-JSON API failures without presenting a result as successful", as
   await expect(page.locator("#result-summary")).toBeHidden();
   await expect(page.locator("#result-json")).toContainText("Service temporarily unavailable");
 });
+
+test("blocks bearer credentials from being sent to a remote HTTP API", async ({ page }) => {
+  let requests = 0;
+  await page.route("http://example.com/**", async (route) => {
+    requests += 1;
+    await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+  await page.goto(entry);
+  await page.locator("#api-base").fill("http://example.com");
+  await page.getByLabel("Bearer credential").fill("short-lived-test-token");
+  await page.getByLabel(/What problem are you trying to solve/).fill("Automate a manual invoice workflow");
+  await page.getByLabel("Desired outcome *").fill("Reduce processing time while retaining human approval.");
+  await page.getByRole("button", { name: "Evaluate decision" }).click();
+  await expect(page.getByRole("status")).toContainText("non-HTTPS remote API");
+  expect(requests).toBe(0);
+});
+
+test("rejects API URLs containing embedded credentials, query strings, or fragments", async ({ page }) => {
+  let requests = 0;
+  await page.route("http://example.com/**", async (route) => {
+    requests += 1;
+    await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+  await page.goto(entry);
+  await page.locator("#api-base").fill("https://user:password@example.com");
+  await page.getByLabel("Bearer credential").fill("short-lived-test-token");
+  await page.getByLabel(/What problem are you trying to solve/).fill("Automate a manual invoice workflow");
+  await page.getByLabel("Desired outcome *").fill("Reduce processing time while retaining human approval.");
+  await page.getByRole("button", { name: "Evaluate decision" }).click();
+  await expect(page.getByRole("status")).toContainText("must not contain credentials");
+  expect(requests).toBe(0);
+});
+
