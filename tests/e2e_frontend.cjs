@@ -50,8 +50,19 @@ const assert = require("node:assert/strict");
     assert.equal(await page.locator("#mobile-menu").getAttribute("aria-expanded"), "false");
     assert.equal(await page.locator("#sidebar").evaluate(node => node.classList.contains("open")), false);
     assert.equal(await page.evaluate(() => document.activeElement.id), "mobile-menu", "Escape restores focus to the mobile menu button");
+
+    await page.locator('.nav [data-view="assessment"]').click();
+    await page.locator("#view-assessment").waitFor({ state: "visible" });
+    await page.locator('#candidates-list [data-field="sources"]').first().fill("javascript:alert(1)");
+    let evaluationRequests = 0;
+    page.on("request", request => {
+      if (request.method() === "POST" && request.url().includes("/api/v1/assessments/evaluate")) evaluationRequests += 1;
+    });
+    await page.locator("#assessment-form").evaluate(form => form.requestSubmit());
+    await page.getByText("Evidence source URLs must use HTTP or HTTPS.", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(evaluationRequests, 0, "Invalid evidence URL schemes are rejected before an API request");
     assert.deepEqual(errors, []);
-    console.log("Frontend browser smoke tests passed: navigation, dynamic forms, mobile menu, Escape handling, and no uncaught page errors.");
+    console.log("Frontend browser smoke tests passed: navigation, accessibility, dynamic forms, unsafe URL validation, mobile keyboard focus, and no uncaught page errors.");
   } finally {
     await browser.close();
   }
