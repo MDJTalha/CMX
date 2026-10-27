@@ -36,6 +36,15 @@
       </section>
       <section id="assessment" class="panel">
         <div class="panel-heading"><div><p class="eyebrow">01 / DEFINE THE DECISION</p><h2>New assessment</h2><p class="muted">Describe the outcome you want. Add candidate records in the JSON field using the API contract.</p></div><span class="step-number">01</span></div>
+        <section class="auth-panel" aria-labelledby="auth-heading">
+          <h3 id="auth-heading">API access</h3>
+          <p class="help">Enter a server-issued bearer credential for this session only. It is kept in page memory, never saved to browser storage, and cleared when you reload or close this page. Do not paste an identity-provider password here.</p>
+          <div class="field-grid">
+            <div class="field"><label for="api-token">Bearer credential</label><input id="api-token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste server-issued token" aria-describedby="token-help"></div>
+            <div class="field"><label for="tenant-id">Tenant ID (OIDC mode only)</label><input id="tenant-id" autocomplete="off" spellcheck="false" placeholder="Required only when API uses OIDC"><span id="token-help" class="help">The API remains the authority for authentication and permissions.</span></div>
+          </div>
+          <button id="clear-credential" class="button button-secondary" type="button">Clear credential</button>
+        </section>
         <form id="assessment-form">
           <div class="field-grid">
             <div class="field"><label for="problem">What problem are you trying to solve? <span aria-hidden="true">*</span></label><textarea id="problem" name="problem" rows="3" required maxlength="4000" placeholder="e.g. Reduce manual invoice processing for a small operations team."></textarea></div>
@@ -56,9 +65,9 @@
         </form>
       </section>
       <section id="results" class="panel results-panel" aria-labelledby="results-heading">
-        <div class="panel-heading"><div><p class="eyebrow">02 / REVIEW THE OUTPUT</p><h2 id="results-heading">Assessment results</h2><p class="muted">The API response is shown without changing or embellishing its claims.</p></div><span class="step-number">02</span></div>
+        <div class="panel-heading"><div><p class="eyebrow">02 / REVIEW THE OUTPUT</p><h2 id="results-heading">Assessment results</h2><p class="muted">Review the decision status, candidate evidence and unknowns. Raw response remains available for technical inspection.</p></div><span class="step-number">02</span></div>
         <div id="result-summary" class="empty-state"><div class="empty-icon" aria-hidden="true">≋</div><strong>No assessment yet</strong><p>Complete the form and evaluate to see the API response here.</p></div>
-        <pre id="result-json" class="result-json" hidden tabindex="0" aria-label="Raw assessment response"></pre>
+        <div id="result-review" class="result-review" hidden aria-live="polite"></div><details class="raw-details"><summary>Technical response (JSON)</summary><pre id="result-json" class="result-json" hidden tabindex="0" aria-label="Raw assessment response"></pre></details>
       </section>
       <footer><span>CMX · Customer &amp; Market Experience</span><span>Verify before asserting. Authorize before acting.</span></footer>
     </main>
