@@ -151,7 +151,6 @@ const assert = require("node:assert/strict");
     page.once("dialog", dialog => dialog.accept());
     await page.locator("#clear-session").click();
     await page.locator('.nav [data-view="assessment"]').click();
-    await page.locator("#export-result").click().catch(() => {});
     await page.evaluate(() => { location.hash = "#results"; });
     await page.locator("#view-results").waitFor({ state: "visible" });
     await page.locator("#export-result").click();
