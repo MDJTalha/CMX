@@ -147,3 +147,41 @@ def test_issuance_rejects_terminal_or_changed_durable_record(tmp_path):
     )
     with pytest.raises(RetryAuthorizationError, match="binding or state"):
         issue(store, approver, terminal, decision, now=202)
+
+
+
+def test_concurrent_consumers_can_consume_ticket_only_once(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    tasks, _, store, approver, executor, record, decision = setup(tmp_path)
+    issued = issue(store, approver, record, decision)
+    start = Barrier(2)
+
+    def attempt():
+        start.wait(timeout=5)
+        try:
+            return ("consumed", consume(store, executor, record, issued, now=201).authorization_id)
+        except RetryAuthorizationError as error:
+            return ("rejected", str(error))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(lambda _: attempt(), range(2)))
+
+    assert sum(outcome[0] == "consumed" for outcome in outcomes) == 1
+    rejected = [outcome[1] for outcome in outcomes if outcome[0] == "rejected"]
+    assert len(rejected) == 1
+    assert "already been consumed" in rejected[0] or "concurrently consumed" in rejected[0]
+
+    with tasks._connection() as connection:
+        row = connection.execute(
+            "SELECT consumed_at, executor_id FROM cmx_retry_authorizations WHERE authorization_id=?",
+            (issued.authorization_id,),
+        ).fetchone()
+        events = connection.execute(
+            "SELECT event_type FROM cmx_retry_authorization_events WHERE authorization_id=? ORDER BY sequence",
+            (issued.authorization_id,),
+        ).fetchall()
+    assert row["consumed_at"] == 201
+    assert row["executor_id"] == executor.subject_id
+    assert [event["event_type"] for event in events].count("retry_authorization.consumed") == 1
