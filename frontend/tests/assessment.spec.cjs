@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const entry = pathToFileURL(path.resolve(__dirname, "../frontend/index.html")).href;
+const entry = pathToFileURL(path.resolve(__dirname, "../index.html")).href;
 
 test("validates input before calling the API", async ({ page }) => {
   let requests = 0;
