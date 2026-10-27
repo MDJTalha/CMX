@@ -74,3 +74,15 @@ def test_frontend_navigation_exposes_accessible_current_and_mobile_state():
     assert 'setAttribute("aria-current","page")' in script.text
     assert 'e.key==="Escape"' in script.text
     assert 'prefers-reduced-motion: reduce' in script.text
+
+def test_candidate_fields_have_accessible_labels_and_nonnegative_costs():
+    client = TestClient(app)
+    script = client.get("/app.js")
+    assert script.status_code == 200
+    for expected in (
+        'for="candidate-'+id+'-'+name+'"',
+        'aria-label="Supported capability keys"',
+        'aria-label="Evidence source URLs (comma separated)"',
+        'min="0" step="any"',
+    ):
+        assert expected in script.text
