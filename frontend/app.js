@@ -308,6 +308,72 @@
     if (payload.methodology_note) { const note = document.createElement("p"); note.className = "method-note"; note.textContent = "Methodology: " + String(payload.methodology_note); root.append(note); }
     const raw = $("result-json"); raw.textContent = JSON.stringify(payload, null, 2);
   };
+  const historyStatus = (message, error = false) => {
+    $("history-status").textContent = message;
+    $("history-status").classList.toggle("has-message", Boolean(message));
+    $("history-status").classList.toggle("error", error);
+  };
+  const renderHistory = (items) => {
+    const root = $("history-list"); root.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement("div"); empty.className = "history-empty";
+      empty.textContent = "No saved assessments were returned for this account.";
+      root.append(empty); return;
+    }
+    items.forEach((record) => {
+      const card = document.createElement("article"); card.className = "history-item";
+      const details = record.request || {};
+      const response = record.response || {};
+      const copy = document.createElement("div"); copy.className = "history-item-copy";
+      const title = document.createElement("h3"); title.textContent = String(details.problem_statement || "Business assessment");
+      const meta = document.createElement("p"); meta.className = "candidate-meta";
+      const date = record.created_at ? new Date(record.created_at) : null;
+      meta.textContent = (date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : "Date unavailable") + " · " + String(response.status || "Saved assessment").replaceAll("_", " ") + " · ID " + String(record.assessment_id || "unknown");
+      const summary = document.createElement("p"); summary.textContent = String(response.summary || details.desired_outcome || "Open this saved snapshot to review its details.");
+      copy.append(title, meta, summary);
+      const actions = document.createElement("div"); actions.className = "history-item-actions";
+      const view = document.createElement("button"); view.type = "button"; view.className = "button button-secondary"; view.textContent = "Open report";
+      view.addEventListener("click", async () => {
+        view.disabled = true; view.textContent = "Loading…"; historyStatus("Loading saved assessment " + String(record.assessment_id) + "…");
+        try {
+          const headers = { Accept: "application/json" };
+          if (state.credential) headers.Authorization = "Bearer " + state.credential;
+          if (state.tenantId) headers["X-CMX-Tenant"] = state.tenantId;
+          const response = await fetch(apiBase(Boolean(state.credential)) + "/api/v1/assessments/" + encodeURIComponent(String(record.assessment_id)), { headers });
+          const textBody = await response.text(); let data;
+          try { data = JSON.parse(textBody); } catch { data = { detail: textBody }; }
+          if (!response.ok) throw new Error("Could not load saved report (HTTP " + response.status + "). " + String(data.detail || ""));
+          if (!data.response || typeof data.response !== "object") throw new Error("The saved record does not contain a readable assessment response.");
+          renderResults(data.response);
+          $("result-json").textContent = JSON.stringify(data, null, 2);
+          historyStatus("Loaded saved assessment " + String(record.assessment_id) + ". This is a stored snapshot, not a fresh evaluation.");
+          $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+        } catch (error) { historyStatus(error.message, true); }
+        finally { view.disabled = false; view.textContent = "Open report"; }
+      });
+      actions.append(view); card.append(copy, actions); root.append(card);
+    });
+  };
+  $("load-history").addEventListener("click", async () => {
+    const button = $("load-history"); button.disabled = true; button.textContent = "Loading history…";
+    historyStatus("Requesting saved assessments from the configured API…");
+    try {
+      const headers = { Accept: "application/json" };
+      if (state.credential) headers.Authorization = "Bearer " + state.credential;
+      if (state.tenantId) headers["X-CMX-Tenant"] = state.tenantId;
+      const response = await fetch(apiBase(Boolean(state.credential)) + "/api/v1/assessments?limit=50", { headers });
+      const raw = await response.text(); let data;
+      try { data = JSON.parse(raw); } catch { data = { detail: raw }; }
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) throw new Error("History access was denied. Confirm the bearer credential has assessment:read permission and the correct tenant.");
+        throw new Error("History request failed with HTTP " + response.status + ". " + String(data.detail || ""));
+      }
+      if (!Array.isArray(data.items)) throw new Error("The API response did not include an assessment history list.");
+      renderHistory(data.items);
+      historyStatus("Loaded " + data.items.length + " saved assessment" + (data.items.length === 1 ? "" : "s") + " for the authenticated tenant.");
+    } catch (error) { historyStatus(error.message, true); }
+    finally { button.disabled = false; button.textContent = "Load assessment history"; }
+  });
   $("export-report").addEventListener("click", () => {
     if (!state.lastPayload) return;
     downloadFile("cmx-assessment-report.json", JSON.stringify({ exported_at: new Date().toISOString(), source: "CMX API response", assessment: state.lastPayload }, null, 2), "application/json;charset=utf-8");
