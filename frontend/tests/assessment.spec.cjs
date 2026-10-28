@@ -160,6 +160,8 @@ test("live source discovery uses bearer auth and renders unverified sources safe
     }) });
   });
   await openWorkspace(page);
+  await page.locator("#settings-toggle").click();
+  await expect(page.locator("#api-token")).toBeVisible();
   await page.locator("#api-token").fill("search-test-token");
   await completeAssessment(page, false, false);
   await page.getByRole("button", { name: "Search for solution sources" }).click();
