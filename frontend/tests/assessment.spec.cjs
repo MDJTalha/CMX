@@ -178,7 +178,7 @@ test("live source discovery explains missing authorization and missing provider 
   await completeAssessment(page, false, false);
   await page.getByRole("button", { name: "Search for solution sources" }).click();
   await expect(page.locator("#discovery-status")).toContainText("authorized bearer credential");
-  await page.locator("#api-token").fill("search-test-token");
+  await page.locator("#api-token").fill("search-test-token", { force: true });
   await page.route(api + "/api/v1/research/search", async (route) => route.fulfill({
     status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Brave Search API key is not configured." })
   }));
