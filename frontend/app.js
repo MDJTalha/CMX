@@ -2,7 +2,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const form = $("assessment-form");
-  const state = { step: 1, credential: "", tenantId: "" };
+  const state = { step: 1, credential: "", tenantId: "", lastPayload: null };
   const labels = {
     workflow_automation: "Workflow automation",
     reporting_analytics: "Reporting and analytics",
@@ -213,7 +213,49 @@
   const appendBadge = (parent, text, tone = "neutral") => {
     const badge = document.createElement("span"); badge.className = "status-pill" + (tone === "good" ? "" : tone === "warning" ? " warning" : " neutral"); badge.textContent = text; parent.append(badge);
   };
+  const downloadFile = (filename, content, type) => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url; link.download = filename; link.hidden = true;
+    document.body.append(link); link.click(); link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const csvCell = (value) => '"' + String(value == null ? "" : value).replaceAll('"', '""') + '"';
+  const renderComparison = (root, evaluations) => {
+    if (evaluations.length < 2) return;
+    const section = document.createElement("section"); section.className = "comparison-section";
+    const heading = document.createElement("h4"); heading.textContent = "Side-by-side comparison";
+    const note = document.createElement("p"); note.className = "candidate-meta";
+    note.textContent = "Returned by the configured CMX API. Unknown values are not treated as passes.";
+    const wrap = document.createElement("div"); wrap.className = "comparison-table-wrap";
+    const table = document.createElement("table"); table.className = "comparison-table";
+    const columns = [
+      ["Option", item => item.name || item.candidate_id || "Unnamed option"],
+      ["Eligibility", item => item.eligibility || "Unknown"],
+      ["Documented match", item => item.documented_match_score == null ? "Unknown" : Number(item.documented_match_score).toFixed(0) + "%"],
+      ["First-year cost", item => item.estimated_first_year_cost_usd == null ? "Unknown" : "USD " + Number(item.estimated_first_year_cost_usd).toLocaleString(undefined, {maximumFractionDigits:2})],
+      ["Budget fit", item => item.budget_status || "Unknown"],
+      ["Region fit", item => item.region_status || "Unknown"],
+      ["Evidence", item => item.evidence_status || "Unknown"],
+      ["Unknown requirements", item => Array.isArray(item.unknown_requirements) ? item.unknown_requirements.length : "Unknown"],
+      ["Failed requirements", item => Array.isArray(item.failed_requirements) ? item.failed_requirements.length : "Unknown"]
+    ];
+    const thead = document.createElement("thead"), headRow = document.createElement("tr");
+    columns.forEach(([label]) => { const th = document.createElement("th"); th.scope = "col"; th.textContent = label; headRow.append(th); });
+    thead.append(headRow);
+    const tbody = document.createElement("tbody");
+    evaluations.forEach(item => {
+      const tr = document.createElement("tr");
+      columns.forEach(([, getter], index) => { const cell = document.createElement(index === 0 ? "th" : "td"); if(index === 0) cell.scope = "row"; cell.textContent = String(getter(item)); tr.append(cell); });
+      tbody.append(tr);
+    });
+    table.append(thead, tbody); wrap.append(table); section.append(heading, note, wrap); root.append(section);
+  };
   const renderResults = (payload) => {
+    state.lastPayload = payload;
+    $("export-report").disabled = false;
+    $("export-comparison").disabled = !(Array.isArray(payload.evaluations) && payload.evaluations.length > 0);
     const root = $("result-review");
     root.replaceChildren(); root.hidden = false; $("result-empty").hidden = true;
     const statusText = String(payload.status || "Response received").replaceAll("_", " ");
@@ -262,9 +304,33 @@
       }
       root.append(card);
     });
+    renderComparison(root, evaluations);
     if (payload.methodology_note) { const note = document.createElement("p"); note.className = "method-note"; note.textContent = "Methodology: " + String(payload.methodology_note); root.append(note); }
     const raw = $("result-json"); raw.textContent = JSON.stringify(payload, null, 2);
   };
+  $("export-report").addEventListener("click", () => {
+    if (!state.lastPayload) return;
+    downloadFile("cmx-assessment-report.json", JSON.stringify({ exported_at: new Date().toISOString(), source: "CMX API response", assessment: state.lastPayload }, null, 2), "application/json;charset=utf-8");
+    $("export-status").textContent = "JSON report exported. Review it before sharing; it may contain business-sensitive information.";
+  });
+  $("export-comparison").addEventListener("click", () => {
+    const evaluations = state.lastPayload && Array.isArray(state.lastPayload.evaluations) ? state.lastPayload.evaluations : [];
+    if (!evaluations.length) return;
+    const columns = [
+      ["name", item => item.name || item.candidate_id || ""], ["eligibility", item => item.eligibility || "unknown"],
+      ["documented_match_score_percent", item => item.documented_match_score == null ? "" : item.documented_match_score],
+      ["estimated_first_year_cost_usd", item => item.estimated_first_year_cost_usd == null ? "" : item.estimated_first_year_cost_usd],
+      ["budget_status", item => item.budget_status || "unknown"], ["region_status", item => item.region_status || "unknown"],
+      ["evidence_status", item => item.evidence_status || "unknown"], ["pricing_status", item => item.pricing_status || "unknown"],
+      ["matched_requirements", item => Array.isArray(item.matched_requirements) ? item.matched_requirements.join("; ") : ""],
+      ["unknown_requirements", item => Array.isArray(item.unknown_requirements) ? item.unknown_requirements.join("; ") : ""],
+      ["failed_requirements", item => Array.isArray(item.failed_requirements) ? item.failed_requirements.join("; ") : ""],
+      ["warnings", item => Array.isArray(item.warnings) ? item.warnings.join("; ") : ""]
+    ];
+    const rows = [columns.map(([name]) => name), ...evaluations.map(item => columns.map(([, getter]) => getter(item)))];
+    downloadFile("cmx-candidate-comparison.csv", rows.map(row => row.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8");
+    $("export-status").textContent = "CSV comparison exported from the API response. Blank values mean the API did not provide that field.";
+  });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = $("evaluate-button");
@@ -285,6 +351,7 @@
       }
       if (candidates.length === 0 && !window.confirm("No solution options have been added. CMX can only assess supplied options. Continue and ask the API to evaluate the requirements without candidates?")) return;
     } catch (error) { status.textContent = error.message; return; }
+    state.lastPayload = null; $("export-report").disabled = true; $("export-comparison").disabled = true; $("export-status").textContent = "";
     $("result-review").hidden = true;
     $("result-review").replaceChildren();
     $("result-empty").hidden = false;
