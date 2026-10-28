@@ -23,13 +23,13 @@ Start with a specific SME back-office workflow decision. The first target niche 
 - Operator CLI to issue or revoke service credentials; no public credential-administration endpoint.
 - Automated decision, API, credential, workflow and persistence tests, plus GitHub Actions CI.
 
-The deterministic decision engine only evaluates candidate records supplied in the request. It does **not** browse the web, independently verify sources, retrieve live prices, call an LLM, train ML models, execute business actions, persist assessments or run advertisements.
+The deterministic decision engine evaluates candidate records supplied in the request. A separate, authenticated source-discovery endpoint can retrieve bounded Brave Search result metadata when configured; those results are unverified leads, not verified claims, vendor recommendations or pricing. CMX does not crawl full pages, independently verify sources, retrieve live prices, call an LLM, train ML models, execute business actions or run advertisements.
 
 ## Reasoning kernel status — under active development
 
 The dependent draft pull-request series includes validated decision contracts, a task lifecycle kernel, bounded JSON Schema validation, tenant-scoped authorization policy, durable SQLite task/audit records, persisted workflow plans and step results, approval gates, and a controlled coordinator that runs explicitly injected handlers in dependency order. The assessment HTTP route now requires a server-issued bearer service credential with the assessment:write permission.
 
-This remains an engineering foundation, not a production autonomous business platform. Service-key authentication does not provide OIDC, human login, MFA, a browser session, rate limiting, managed secrets, production-scale persistence or resource-level tenant enforcement for future stored assessments. No live vendor retrieval, LLM provider or external integration adapter is connected. Never construct PrincipalContext from client-supplied JSON. The coordinator's default in-process handlers still cannot be forcibly stopped. An opt-in SubprocessJSONHandler adapter now enforces parent-side deadlines and bounds JSON streams for explicitly configured fixed commands; it is process isolation, not an OS sandbox. A timeout means the side-effect outcome is unknown and must not trigger blind replay. SQLite is a single-node reference backend. All changes remain in draft pull requests and require review before merging.
+This remains an engineering foundation, not a production autonomous business platform. Service-key authentication does not provide OIDC, human login, MFA, a browser session, rate limiting, managed secrets, production-scale persistence or resource-level tenant enforcement for future stored assessments. Live search metadata retrieval is available through the optional Brave Search adapter; no LLM provider or full-page crawling adapter is connected. Never construct PrincipalContext from client-supplied JSON. The coordinator's default in-process handlers still cannot be forcibly stopped. An opt-in SubprocessJSONHandler adapter now enforces parent-side deadlines and bounds JSON streams for explicitly configured fixed commands; it is process isolation, not an OS sandbox. A timeout means the side-effect outcome is unknown and must not trigger blind replay. SQLite is a single-node reference backend. All changes remain in draft pull requests and require review before merging.
 
 ## Quick start — Windows PowerShell
 
@@ -65,10 +65,17 @@ If local PowerShell policy blocks running the script, use a process-scoped polic
 - GET /health
 - GET /api/v1
 - POST /api/v1/assessments/evaluate — requires a server-issued bearer credential with assessment:write
+- POST /api/v1/research/search — requires the same permission and a configured server-side Brave Search key
 
-The evaluation endpoint accepts a problem statement, desired outcome, target region, optional first-year budget, weighted requirements and candidate records. It returns candidate eligibility, documented requirement coverage, known failures, unknowns, budget/region status and warnings.
+The evaluation endpoint accepts a problem statement, desired outcome, target region, optional first-year budget, weighted requirements and candidate records. It returns candidate eligibility, documented requirement coverage, known failures, unknowns, budget/region status and warnings. The research endpoint returns bounded search-result titles, snippets, HTTPS URLs and retrieval timestamps; it does not verify source claims or pricing.
 
 Example request: examples/assessment.json
+
+## Optional live source discovery
+
+Live source discovery uses the Brave Search API from the **server**, never directly from the browser. Set `CMX_BRAVE_SEARCH_API_KEY` in the API process or deployment's secret environment configuration. Do not commit the key, expose it in frontend settings, or place it in browser storage. If the key is absent or the provider is unavailable, the endpoint returns a service-unavailable response rather than fabricating results.
+
+The authenticated `POST /api/v1/research/search` endpoint accepts a bounded query, region and `max_results` (1–10). It returns actual search-result metadata marked as unverified. Results are leads for human review; they are not proof of product capabilities, security certifications, regional availability or current pricing. Search queries include the user's problem and outcome text, so users should remove confidential or sensitive details before using discovery. The endpoint has no full-page crawler and does not auto-create candidate records.
 
 ## Decision and evidence rules
 

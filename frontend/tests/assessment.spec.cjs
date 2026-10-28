@@ -10,7 +10,7 @@ async function openWorkspace(page) {
   await page.locator("#settings-toggle").click();
   await page.locator("#api-base").fill(api);
 }
-async function completeAssessment(page, candidate = true) {
+async function completeAssessment(page, candidate = true, review = true) {
   await page.getByLabel(/Describe the business problem/).fill("Our team spends too much time reconciling attendance and payroll inputs.");
   await page.getByLabel(/What would success look like/).fill("Reduce manual work and improve accuracy while retaining human approval.");
   await page.getByRole("button", { name: /Continue to requirements/ }).click();
@@ -19,7 +19,7 @@ async function completeAssessment(page, candidate = true) {
     await page.locator('[data-field="name"]').fill("Example HR Platform");
     await page.locator('[data-field="capabilities"]').fill("workflow_automation,reporting_analytics");
   }
-  await page.getByRole("button", { name: /Review assessment/ }).click();
+  if (review) await page.getByRole("button", { name: /Review assessment/ }).click();
 }
 
 test("guided assessment validates the problem before advancing", async ({ page }) => {
@@ -141,4 +141,48 @@ test("supports keyboard navigation and has no horizontal overflow on mobile", as
   await expect(page.getByRole("heading", { name: "Make better decisions. With evidence." })).toBeVisible();
   const dimensions = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, document: document.documentElement.scrollWidth }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
+});
+
+
+test("live source discovery uses bearer auth and renders unverified sources safely", async ({ page }) => {
+  let received;
+  await page.route(api + "/api/v1/research/search", async (route) => {
+    received = { headers: route.request().headers(), body: route.request().postDataJSON() };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      query: { query: "test query", region: "Pakistan", max_results: 5 },
+      provider: "brave_search",
+      retrieved_at: "2026-10-28T10:00:00Z",
+      sources: [
+        { title: "<script>alert(1)</script>", url: "https://vendor.example/product", snippet: "Official result snippet", retrieved_at: "2026-10-28T10:00:00Z" },
+        { title: "Unsafe URL", url: "javascript:alert(1)", snippet: "Unsafe link should not be opened", retrieved_at: "2026-10-28T10:00:00Z" }
+      ],
+      limitations: ["Search results are unverified evidence."]
+    }) });
+  });
+  await openWorkspace(page);
+  await page.locator("#api-token").fill("search-test-token");
+  await completeAssessment(page, false, false);
+  await page.getByRole("button", { name: "Search for solution sources" }).click();
+  await expect(page.locator("#discovery-status")).toContainText("Retrieved 2 search sources");
+  await expect(page.locator("#discovery-results").getByText("<script>alert(1)</script>", { exact: true })).toBeVisible();
+  await expect(page.locator("#discovery-results script")).toHaveCount(0);
+  await expect(page.locator("#discovery-results a[href^='javascript:']")).toHaveCount(0);
+  await expect(page.locator("#discovery-results")).toContainText(/unverified search result/i);
+  expect(received.headers.authorization).toBe("Bearer search-test-token");
+  expect(received.body.region).toBe("Pakistan");
+  expect(received.body.max_results).toBe(5);
+});
+
+test("live source discovery explains missing authorization and missing provider configuration", async ({ page }) => {
+  await openWorkspace(page);
+  await completeAssessment(page, false, false);
+  await page.getByRole("button", { name: "Search for solution sources" }).click();
+  await expect(page.locator("#discovery-status")).toContainText("authorized bearer credential");
+  await expect(page.locator("#api-token")).toBeVisible();
+  await page.locator("#api-token").fill("search-test-token");
+  await page.route(api + "/api/v1/research/search", async (route) => route.fulfill({
+    status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Brave Search API key is not configured." })
+  }));
+  await page.getByRole("button", { name: "Search for solution sources" }).click();
+  await expect(page.locator("#discovery-status")).toContainText("CMX_BRAVE_SEARCH_API_KEY configured");
 });
