@@ -2,7 +2,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const form = $("assessment-form");
-  const state = { step: 1, credential: "", candidateCount: 0 };
+  const state = { step: 1, credential: "", tenantId: "" };
   const labels = {
     workflow_automation: "Workflow automation",
     reporting_analytics: "Reporting and analytics",
@@ -47,10 +47,13 @@
     if (willOpen) $("api-base").focus();
   });
   $("api-token").addEventListener("input", (event) => { state.credential = event.currentTarget.value.trim(); });
+  $("tenant-id").addEventListener("input", (event) => { state.tenantId = event.currentTarget.value.trim(); });
   $("clear-credential").addEventListener("click", () => {
     state.credential = "";
     $("api-token").value = "";
-    announce("Credential cleared from this page. It is never stored in browser storage.");
+    state.tenantId = "";
+    $("tenant-id").value = "";
+    announce("Credential and tenant selector cleared from this page. They are never stored in browser storage.");
   });
   $("check-api").addEventListener("click", async () => {
     const button = $("check-api");
@@ -275,6 +278,7 @@
     try {
       const headers = { Accept: "application/json", "Content-Type": "application/json" };
       if (state.credential) headers.Authorization = "Bearer " + state.credential;
+      if (state.tenantId) headers["X-CMX-Tenant"] = state.tenantId;
       const response = await fetch(apiBase(Boolean(state.credential)) + "/api/v1/assessments/evaluate", { method: "POST", headers, body: JSON.stringify(body) });
       const rawText = await response.text();
       let payload;
