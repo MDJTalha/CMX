@@ -138,6 +138,89 @@
     list.append(candidateCard(list.children.length));
   };
   $("add-candidate").addEventListener("click", addCandidate);
+  $("discover-options").addEventListener("click", async () => {
+    const button = $("discover-options");
+    const status = $("discovery-status");
+    const root = $("discovery-results");
+    root.replaceChildren();
+    if (!state.credential) {
+      status.textContent = "Enter an authorized bearer credential in API settings before searching.";
+      $("settings-toggle").click();
+      $("api-token").focus();
+      return;
+    }
+    const problem = $("problem").value.trim();
+    const outcome = $("outcome").value.trim();
+    if (problem.length < 10 || outcome.length < 3) {
+      status.textContent = "Describe the business problem and desired outcome in Step 1 before searching.";
+      return;
+    }
+    const query = [problem, outcome, "software solution vendor"].join(" ").slice(0, 500);
+    button.disabled = true;
+    button.textContent = "Searching…";
+    status.textContent = "Requesting live search results. Returned sources will remain unverified.";
+    try {
+      const headers = { Accept: "application/json", "Content-Type": "application/json" };
+      headers.Authorization = "Bearer " + state.credential;
+      if (state.tenantId) headers["X-CMX-Tenant"] = state.tenantId;
+      const response = await fetch(apiBase(true) + "/api/v1/research/search", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ query, region: $("region").value.trim() || "global", max_results: 5 })
+      });
+      const raw = await response.text();
+      let data;
+      try { data = JSON.parse(raw); } catch { data = { detail: raw }; }
+      if (!response.ok) {
+        const reason = String(data.detail || "Research request failed.");
+        if (response.status === 503) throw new Error(reason + " Check that the API has CMX_BRAVE_SEARCH_API_KEY configured.");
+        if (response.status === 401 || response.status === 403) throw new Error("Search access was denied. Confirm this credential has assessment:write permission.");
+        throw new Error("Search request failed with HTTP " + response.status + ". " + reason);
+      }
+      const sources = Array.isArray(data.sources) ? data.sources : [];
+      if (!sources.length) {
+        status.textContent = "The provider returned no usable sources. No vendor options or prices were invented.";
+      } else {
+        status.textContent = "Retrieved " + sources.length + " search source" + (sources.length === 1 ? "" : "s") + " via " + String(data.provider || "configured provider") + " at " + String(data.retrieved_at || "an unknown time") + ". Review each source; these are not verified claims.";
+        sources.forEach((source) => {
+          const card = document.createElement("article");
+          card.className = "discovery-source";
+          const heading = document.createElement("h4");
+          heading.textContent = String(source.title || "Untitled source");
+          const snippet = document.createElement("p");
+          snippet.textContent = String(source.snippet || "No search snippet was supplied.");
+          const link = document.createElement("a");
+          try {
+            const parsed = new URL(String(source.url));
+            if (parsed.protocol !== "https:") throw new Error("Only HTTPS sources can be opened.");
+            link.href = parsed.href;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = "Open source";
+          } catch {
+            link.textContent = "Source URL unavailable or unsafe";
+            link.removeAttribute("href");
+          }
+          const meta = document.createElement("p");
+          meta.className = "candidate-meta";
+          meta.textContent = "Retrieved: " + String(source.retrieved_at || data.retrieved_at || "unknown") + " · Unverified search result";
+          card.append(heading, snippet, link, meta);
+          root.append(card);
+        });
+      }
+      if (Array.isArray(data.limitations) && data.limitations.length) {
+        const note = document.createElement("p");
+        note.className = "candidate-meta";
+        note.textContent = "Limitations: " + data.limitations.join(" ");
+        root.append(note);
+      }
+    } catch (error) {
+      status.textContent = error.message + " Your search has not been confirmed as successful.";
+    } finally {
+      button.disabled = false;
+      button.textContent = "Search for solution sources";
+    }
+  });
   addCandidate();
   const readCandidates = () => {
     const cards = Array.from(document.querySelectorAll(".candidate-card"));
