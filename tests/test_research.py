@@ -80,7 +80,7 @@ def test_retrieval_deduplicates_urls_and_limits_results():
     assert len(result.sources) == 2
     assert result.sources[0].title == "Product"
     assert result.sources[1].title == "Pricing"
-    assert result.sources[0].url == "https://vendor.example/product#overview"
+    assert str(result.sources[0].url) == "https://vendor.example/product#overview"
     assert result.sources[0].retrieved_at.tzinfo is not None
     assert "unverified evidence" in result.limitations[0]
 
