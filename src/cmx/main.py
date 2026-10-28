@@ -15,6 +15,8 @@ from cmx.assessment_store import AssessmentIntegrityError, SQLiteAssessmentStore
 from cmx.engine import evaluate_decision
 from cmx.models import DecisionRequest, DecisionResponse
 from cmx.oidc_auth import OIDCAuthenticator, OIDCIdentityStore, OIDCProviderUnavailable
+from cmx.research import ResearchProviderUnavailable, ResearchQuery, retrieve_sources
+from cmx.research_provider import BraveSearchProvider
 from cmx.security import AuthorizationError, PrincipalContext, authorize_permissions
 from cmx.service_auth import (
     CredentialStoreIntegrityError,
@@ -62,7 +64,8 @@ app = FastAPI(
     description=(
         "A local-first decision engine that compares supplied candidate records "
         "against explicit requirements. It does not browse the web, validate sources, "
-        "or connect to an LLM in this version. Assessment evaluation requires a "
+        "or connect to an LLM in this version. Live source discovery is available only "
+        "when a server-side Brave Search API key is configured. Assessment evaluation requires a "
         "server-issued bearer service credential with the assessment:write permission."
     ),
     version=__version__,
@@ -209,6 +212,28 @@ def api_info() -> dict[str, str]:
         "meaning": "Customer & Market Experience",
         "assessment_authentication": "Bearer service credential",
     }
+
+
+@app.post(
+    "/api/v1/research/search",
+    tags=["Market Research"],
+)
+def search_research_sources(
+    request: ResearchQuery,
+    principal: PrincipalContext = Depends(require_assessment_write),
+) -> dict[str, object]:
+    """Retrieve bounded source metadata; every result remains unverified evidence."""
+    del principal  # Authentication and permission are enforced by the dependency.
+    try:
+        provider = BraveSearchProvider.from_environment()
+        result = retrieve_sources(request, provider)
+        return result.model_dump(mode="json")
+    except ResearchProviderUnavailable as exc:
+        # Provider details are intentionally generic and never include secrets.
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
 
 
 @app.post(
