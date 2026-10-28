@@ -195,7 +195,7 @@
     };
     addBlock("Business problem", $("problem").value.trim());
     addBlock("Desired outcome", $("outcome").value.trim());
-    addBlock("Context", ["Company size: " + ($("company-size").value || "Not supplied"), "Region: " + ($("region").value.trim() || "global"), "Budget: " + ($("budget").value ? "USD " + Number($("budget").value).toLocaleString() : "Not supplied"), "Timing: " + $("urgency").selectedOptions[0].text]);
+    addBlock("Decision context", ["Region: " + ($("region").value.trim() || "global"), "Budget: " + ($("budget").value ? "USD " + Number($("budget").value).toLocaleString() : "Not supplied")]);
     addBlock("Requirements", selectedRequirements().map((item) => item.label + " · priority " + item.weight + (item.mandatory ? " · mandatory" : " · preferred")));
     try {
       const candidates = readCandidates();
