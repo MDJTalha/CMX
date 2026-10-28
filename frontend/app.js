@@ -170,7 +170,9 @@
       });
       const raw = await response.text();
       let data;
-      try { data = JSON.parse(raw); } catch { data = { detail: raw }; }
+      try { data = JSON.parse(raw); } catch {
+        throw new Error("The search endpoint returned a malformed response. No successful search was confirmed.");
+      }
       if (!response.ok) {
         const reason = String(data.detail || "Research request failed.");
         if (response.status === 503) throw new Error(reason + " Check that the API has CMX_BRAVE_SEARCH_API_KEY configured.");
