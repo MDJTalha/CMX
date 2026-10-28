@@ -145,7 +145,8 @@
     root.replaceChildren();
     if (!state.credential) {
       status.textContent = "Enter an authorized bearer credential in API settings before searching.";
-      $("settings-toggle").click();
+      const settingsPanel = $("connection-settings");
+      if (settingsPanel.hidden) $("settings-toggle").click();
       $("api-token").focus();
       return;
     }
