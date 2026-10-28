@@ -73,11 +73,11 @@
   });
   const goToStep = (next) => {
     if (next > state.step && state.step === 1) {
-      if ($("problem").value.trim().length < 10) { $("problem").focus(); $("form-status").textContent = "Please describe the problem in at least 10 characters."; return; }
-      if ($("outcome").value.trim().length < 3) { $("outcome").focus(); $("form-status").textContent = "Please describe the desired outcome."; return; }
+      if ($("problem").value.trim().length < 10) { $("problem").focus(); announceFormStatus("Please describe the problem in at least 10 characters."); return; }
+      if ($("outcome").value.trim().length < 3) { $("outcome").focus(); announceFormStatus("Please describe the desired outcome."); return; }
     }
     if (next > state.step && state.step === 2 && !selectedRequirements().length) {
-      $("form-status").textContent = "Choose at least one requirement before continuing."; return;
+      announceFormStatus("Choose at least one requirement before continuing."); return;
     }
     if (next === 4) renderReview();
     state.step = next;
@@ -88,11 +88,12 @@
       item.classList.toggle("done", n < next);
       if (n === next) item.setAttribute("aria-current", "step"); else item.removeAttribute("aria-current");
     });
-    $("form-status").textContent = "";
-    if (next === 4) $("review-summary").focus?.();
+    announceFormStatus("");
+    if (next === 4) { $("review-heading").setAttribute("tabindex", "-1"); $("review-heading").focus(); }
   };
   document.querySelectorAll("[data-next]").forEach((button) => button.addEventListener("click", () => goToStep(Number(button.dataset.next))));
   document.querySelectorAll("[data-back]").forEach((button) => button.addEventListener("click", () => goToStep(Number(button.dataset.back))));
+  const announceFormStatus = (message) => { const status = $("form-status"); status.textContent = message; status.classList.toggle("has-message", Boolean(message)); };
   const selectedRequirements = () => {
     const items = [];
     document.querySelectorAll("#requirements-list input[type=checkbox]:checked").forEach((input) => {
@@ -113,15 +114,16 @@
     article.dataset.candidateIndex = String(index);
     article.innerHTML = '<div class="candidate-card-head"><b>Option ' + (index + 1) + '</b><button class="remove-candidate" type="button">Remove option</button></div>' +
       '<div class="candidate-grid">' +
-      '<div class="field"><label>Solution name *</label><input data-field="name" maxlength="180" placeholder="e.g. Existing HR platform" required></div>' +
-      '<div class="field"><label>Category *</label><select data-field="category"><option value="business_software">Business software</option><option value="workflow_automation">Workflow automation</option><option value="process_improvement">Process improvement</option><option value="custom_development">Custom development</option><option value="consulting">Consulting service</option><option value="other">Other</option></select></div>' +
-      '<div class="field"><label>Setup cost (USD)</label><input data-field="setup" type="number" min="0" step=".01" placeholder="Leave blank if unknown"></div>' +
-      '<div class="field"><label>Monthly cost (USD)</label><input data-field="monthly" type="number" min="0" step=".01" placeholder="Leave blank if unknown"></div>' +
-      '<div class="field"><label>Pricing evidence</label><select data-field="pricing"><option value="unknown">Unknown</option><option value="user_provided">User supplied</option><option value="estimated">Estimated</option><option value="verified">Verified by trusted process</option></select></div>' +
-      '<div class="field"><label>Evidence status</label><select data-field="evidence"><option value="unknown">Unknown</option><option value="user_provided">User supplied</option><option value="estimated">Estimated</option><option value="assumed">Assumed</option><option value="verified">Verified by trusted process</option></select></div>' +
-      '</div><div class="field"><label>Capabilities this option supports</label><input data-field="capabilities" placeholder="Select keys from requirements, comma-separated"><small>Only add capabilities you have a basis to claim. Keys: ' + Object.keys(labels).join(", ") + '</small></div>' +
-      '<div class="field"><label>Source URL (optional)</label><input data-field="source" type="url" placeholder="https://vendor.example/product"></div>' +
-      '<div class="field"><label>Evidence notes (optional)</label><input data-field="notes" maxlength="500" placeholder="Where did this information come from?"></div>';
+      '<div class="field"><label for="candidate-' + index + '-name">Solution name *</label><input id="candidate-' + index + '-name" data-field="name" maxlength="180" placeholder="e.g. Existing HR platform" required></div>' +
+      '<div class="field"><label for="candidate-' + index + '-category">Category *</label><select id="candidate-' + index + '-category" data-field="category"><option value="business_software">Business software</option><option value="workflow_automation">Workflow automation</option><option value="process_improvement">Process improvement</option><option value="custom_development">Custom development</option><option value="consulting">Consulting service</option><option value="other">Other</option></select></div>' +
+      '<div class="field"><label for="candidate-' + index + '-setup">Setup cost (USD)</label><input id="candidate-' + index + '-setup" data-field="setup" type="number" min="0" step=".01" placeholder="Leave blank if unknown"></div>' +
+      '<div class="field"><label for="candidate-' + index + '-monthly">Monthly cost (USD)</label><input id="candidate-' + index + '-monthly" data-field="monthly" type="number" min="0" step=".01" placeholder="Leave blank if unknown"></div>' +
+      '<div class="field"><label for="candidate-' + index + '-pricing">Pricing evidence</label><select id="candidate-' + index + '-pricing" data-field="pricing"><option value="unknown">Unknown</option><option value="user_provided">User supplied</option><option value="estimated">Estimated</option></select></div>' +
+      '<div class="field"><label for="candidate-' + index + '-evidence">Evidence status</label><select id="candidate-' + index + '-evidence" data-field="evidence"><option value="unknown">Unknown</option><option value="user_provided">User supplied</option><option value="estimated">Estimated</option><option value="assumed">Assumed</option></select></div>' +
+      '</div><div class="field"><label for="candidate-' + index + '-capabilities">Capabilities this option supports</label><input id="candidate-' + index + '-capabilities" data-field="capabilities" placeholder="Select keys from requirements, comma-separated"><small>Only add capabilities you have a basis to claim. Keys: ' + Object.keys(labels).join(", ") + '</small></div>' +
+      '<div class="field"><label for="candidate-' + index + '-regions">Known supported regions</label><input id="candidate-' + index + '-regions" data-field="regions" placeholder="e.g. Pakistan, UAE; leave blank if unknown"><small>Enter only regions supported by evidence; blank means unknown.</small></div>' +
+      '<div class="field"><label for="candidate-' + index + '-source">Source URL (optional)</label><input id="candidate-' + index + '-source" data-field="source" type="url" placeholder="https://vendor.example/product"></div>' +
+      '<div class="field"><label for="candidate-' + index + '-notes">Evidence notes (optional)</label><input id="candidate-' + index + '-notes" data-field="notes" maxlength="500" placeholder="Where did this information come from?"></div>';
     article.querySelector(".remove-candidate").addEventListener("click", () => { article.remove(); renumberCandidates(); });
     return article;
   };
@@ -152,15 +154,21 @@
         summary: value("notes"),
         capability_keys: [...new Set(capabilities)],
         unsupported_capability_keys: [],
-        supported_regions: [],
+        supported_regions: value("regions").split(",").map((item) => item.trim()).filter(Boolean),
         unsupported_regions: [],
         pricing_status: value("pricing"),
         evidence_status: value("evidence"),
         evidence_notes: value("notes") ? [value("notes")] : [],
         source_urls: value("source") ? [value("source")] : []
       };
-      if (value("setup") !== "") candidate.setup_cost_usd = Number(value("setup"));
-      if (value("monthly") !== "") candidate.monthly_cost_usd = Number(value("monthly"));
+      for (const field of ["setup", "monthly"]) {
+        const rawCost = value(field);
+        if (rawCost !== "") {
+          const amount = Number(rawCost);
+          if (!Number.isFinite(amount) || amount < 0) throw new Error("Option " + (index + 1) + " has an invalid " + (field === "setup" ? "setup" : "monthly") + " cost. Enter a non-negative amount or leave it blank.");
+          candidate[field === "setup" ? "setup_cost_usd" : "monthly_cost_usd"] = amount;
+        }
+      }
       candidates.push(candidate);
     }
     return candidates;
@@ -274,6 +282,11 @@
       }
       if (candidates.length === 0 && !window.confirm("No solution options have been added. CMX can only assess supplied options. Continue and ask the API to evaluate the requirements without candidates?")) return;
     } catch (error) { status.textContent = error.message; return; }
+    $("result-review").hidden = true;
+    $("result-review").replaceChildren();
+    $("result-empty").hidden = false;
+    $("result-empty").querySelector("h3").textContent = "Assessment in progress";
+    $("result-empty").querySelector("p").textContent = "The previous result has been cleared. Waiting for the new API response.";
     button.disabled = true; button.textContent = "Evaluating…"; status.textContent = "Sending your assessment securely to the configured CMX API…";
     try {
       const headers = { Accept: "application/json", "Content-Type": "application/json" };
