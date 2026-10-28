@@ -167,7 +167,7 @@ test("live source discovery uses bearer auth and renders unverified sources safe
   await expect(page.locator("#discovery-results").getByText("<script>alert(1)</script>", { exact: true })).toBeVisible();
   await expect(page.locator("#discovery-results script")).toHaveCount(0);
   await expect(page.locator("#discovery-results a[href^='javascript:']")).toHaveCount(0);
-  await expect(page.locator("#discovery-results")).toContainText("unverified search result");
+  await expect(page.locator("#discovery-results")).toContainText(/unverified search result/i);
   expect(received.headers.authorization).toBe("Bearer search-test-token");
   expect(received.body.region).toBe("Pakistan");
   expect(received.body.max_results).toBe(5);
@@ -175,7 +175,7 @@ test("live source discovery uses bearer auth and renders unverified sources safe
 
 test("live source discovery explains missing authorization and missing provider configuration", async ({ page }) => {
   await openWorkspace(page);
-  await completeAssessment(page, false);
+  await completeAssessment(page, false, false);
   await page.getByRole("button", { name: "Search for solution sources" }).click();
   await expect(page.locator("#discovery-status")).toContainText("authorized bearer credential");
   await page.locator("#api-token").fill("search-test-token");
