@@ -58,7 +58,6 @@ test("sends a transient bearer token and safely renders candidate evidence", asy
   await expect(page.getByRole("link", { name: "https://example.com/evidence" })).toHaveAttribute("rel", "noopener noreferrer");
   await expect(page.getByText("javascript:alert(1)", { exact: true })).toBeVisible();
   expect(receivedAuthorization).toBe("Bearer short-lived-test-token");
-  await page.locator("#settings-toggle").click();
   await page.getByRole("button", { name: "Clear credential" }).click();
   await expect(page.locator("#api-token")).toHaveValue("");
 });
