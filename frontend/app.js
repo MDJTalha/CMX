@@ -285,7 +285,12 @@
       try { payload = JSON.parse(rawText); } catch { payload = { response_text: rawText }; }
       $("result-json").textContent = JSON.stringify({ http_status: response.status, response: payload }, null, 2);
       if (!response.ok) {
-        throw new Error(response.status === 401 || response.status === 403 ? "The API rejected access. Confirm the service credential is valid and authorized for assessment:write." : "The API returned HTTP " + response.status + ". Review the technical response below.");
+        status.textContent = response.status === 401 || response.status === 403
+          ? "The API rejected access. Confirm the service credential is valid and authorized for assessment:write."
+          : "The API returned HTTP " + response.status + ". Review the technical response below.";
+        $("result-json").textContent = JSON.stringify({ http_status: response.status, response: payload }, null, 2);
+        $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
       }
       renderResults(payload);
       status.textContent = "Assessment response received. Review evidence, unknowns and warnings before making a decision.";
