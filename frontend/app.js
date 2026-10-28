@@ -103,8 +103,9 @@
     });
     const extra = $("extra-requirements").value.trim();
     if (extra) {
-      const key = extra.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64);
-      if (key.length >= 2 && !items.some((item) => item.key === key)) items.push({ key, label: extra, mandatory: $("extra-mandatory").checked, weight: $("extra-mandatory").checked ? 5 : 3 });
+      const slug = extra.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 59);
+      const key = "req_" + slug;
+      if (slug.length >= 2 && !items.some((item) => item.key === key)) items.push({ key, label: extra + " (key: " + key + ")", mandatory: $("extra-mandatory").checked, weight: $("extra-mandatory").checked ? 5 : 3 });
     }
     return items;
   };
@@ -121,6 +122,7 @@
       '<div class="field"><label for="candidate-' + index + '-pricing">Pricing evidence</label><select id="candidate-' + index + '-pricing" data-field="pricing"><option value="unknown">Unknown</option><option value="user_provided">User supplied</option><option value="estimated">Estimated</option></select></div>' +
       '<div class="field"><label for="candidate-' + index + '-evidence">Evidence status</label><select id="candidate-' + index + '-evidence" data-field="evidence"><option value="unknown">Unknown</option><option value="user_provided">User supplied</option><option value="estimated">Estimated</option><option value="assumed">Assumed</option></select></div>' +
       '</div><div class="field"><label for="candidate-' + index + '-capabilities">Capabilities this option supports</label><input id="candidate-' + index + '-capabilities" data-field="capabilities" placeholder="Select keys from requirements, comma-separated"><small>Only add capabilities you have a basis to claim. Keys: ' + Object.keys(labels).join(", ") + '</small></div>' +
+      '<div class="field"><label for="candidate-' + index + '-unsupported">Known unsupported capabilities</label><input id="candidate-' + index + '-unsupported" data-field="unsupported" placeholder="Keys this option cannot meet, comma-separated"><small>Record known failures, especially for mandatory requirements. Do not guess.</small></div>' +
       '<div class="field"><label for="candidate-' + index + '-regions">Known supported regions</label><input id="candidate-' + index + '-regions" data-field="regions" placeholder="e.g. Pakistan, UAE; leave blank if unknown"><small>Enter only regions supported by evidence; blank means unknown.</small></div>' +
       '<div class="field"><label for="candidate-' + index + '-source">Source URL (optional)</label><input id="candidate-' + index + '-source" data-field="source" type="url" placeholder="https://vendor.example/product"></div>' +
       '<div class="field"><label for="candidate-' + index + '-notes">Evidence notes (optional)</label><input id="candidate-' + index + '-notes" data-field="notes" maxlength="500" placeholder="Where did this information come from?"></div>';
@@ -147,13 +149,14 @@
       const id = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
       if (id.length < 2) throw new Error("Option " + (index + 1) + " needs a name that can form a unique ID.");
       const capabilities = value("capabilities").split(",").map((item) => item.trim()).filter(Boolean);
+      const unsupportedCapabilities = value("unsupported").split(",").map((item) => item.trim()).filter(Boolean);
       const candidate = {
         id: id + "_" + (index + 1),
         name,
         category: value("category"),
         summary: value("notes"),
         capability_keys: [...new Set(capabilities)],
-        unsupported_capability_keys: [],
+        unsupported_capability_keys: [...new Set(unsupportedCapabilities)],
         supported_regions: value("regions").split(",").map((item) => item.trim()).filter(Boolean),
         unsupported_regions: [],
         pricing_status: value("pricing"),
@@ -311,7 +314,7 @@
     } catch (error) {
       status.textContent = error.message + " Your assessment has not been confirmed as successful.";
       if (!$("connection-settings").hidden) announce(error.message, "error");
-      $("result-json").textContent = JSON.stringify({ error: error.message, note: "No successful assessment response was confirmed." }, null, 2);
+      $("result-json").textContent = JSON.stringify({ error: error.message, note: "No successful assessment response was confirmed.", request_body: body }, null, 2);
       $("results").scrollIntoView({ behavior: "smooth", block: "start" });
     } finally { button.disabled = false; button.innerHTML = 'Evaluate assessment <span>→</span>'; }
   });
