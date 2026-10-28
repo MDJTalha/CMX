@@ -64,7 +64,7 @@
       const response = await fetch(apiBase() + "/health", { headers: { Accept: "application/json" } });
       if (!response.ok) throw new Error("Health endpoint returned HTTP " + response.status + ".");
       await response.json();
-      announce("API is reachable. Protected assessments still require an authorized credential.", "ok");
+      announce("API is reachable. Health is public; assessment requests still require a bearer credential and permission.", "ok");
       setApiMini("API reachable · protected access required", "ok");
     } catch (error) {
       announce(error.message + " Confirm the API is deployed and its CORS allowlist includes this site.", "error");
