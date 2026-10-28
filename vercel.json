@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "echo \"CMX static frontend: no build step required\"",
+  "outputDirectory": "frontend",
+  "cleanUrls": true
+}
