@@ -12,7 +12,7 @@ services:
         sync: false
       - key: CMX_BRAVE_SEARCH_API_KEY
         sync: false
-      - key: CMX_AUTH_DATABASE_PATH
+      - key: CMX_AUTH_DB_PATH
         value: /opt/render/project/src/data/cmx-auth.sqlite3
       - key: CMX_ASSESSMENT_DB_PATH
         value: /opt/render/project/src/data/cmx-assessments.sqlite3
